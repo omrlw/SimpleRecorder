@@ -1,0 +1,11 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="HudSurfaceBrush" Color="#FF161616" />
+    <SolidColorBrush x:Key="HudSurfaceAltBrush" Color="#FF262626" />
+    <SolidColorBrush x:Key="HudStrokeBrush" Color="#1FFFFFFF" />
+    <SolidColorBrush x:Key="HudLightBrush" Color="#FFE8E3DB" />
+    <SolidColorBrush x:Key="HudLightBorderBrush" Color="#12000000" />
+    <SolidColorBrush x:Key="HudAccentBrush" Color="#FFFF3040" />
+    <SolidColorBrush x:Key="HudSuccessBrush" Color="#FFE3F5EC" />
+</ResourceDictionary>

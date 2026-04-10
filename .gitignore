@@ -1,0 +1,42 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+TestResults/
+AppPackages/
+BundleArtifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+
+# Logs
+*.log
+presentation-build.log
+
+# Packaging
+*.appx
+*.appxbundle
+*.appxupload
+*.msix
+*.msixbundle
+*.msixupload
+*.cer
+
+# Editors
+.idea/
+.vscode/
+
+# Local cache and temp
+*.cache
+*.tmp
+*.temp
+Thumbs.db
+Desktop.ini
