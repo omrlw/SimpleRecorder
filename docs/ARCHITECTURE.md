@@ -1,49 +1,65 @@
-# Architecture Overview
+# Architecture
 
-## Design Goals
+## Target solution shape
+The repository should converge on this structure:
 
-- high-performance Windows-first recorder
-- premium but minimal HUD UX
-- GPU-first pipeline
-- maintainable modular monolith
+```text
+SimpleRecorder.sln
+Directory.Build.props
+Directory.Packages.props
+README.md
+build/
+  setup-dev-env.ps1
+  restore.ps1
+Audio/
+  SimpleRecorderClose.wav
+  SimpleRecorderStart.wav
+src/
+  SimpleRecorder.App/
+  SimpleRecorder.Presentation/
+  SimpleRecorder.Contracts/
+  SimpleRecorder.Infrastructure/
+  SimpleRecorder.Engine.Native/
+```
 
-## Modules
-
+## Module responsibilities
 ### SimpleRecorder.App
-
-Owns process startup, dependency composition, and the main WinUI window.
+- Packaged WinUI 3 entry point.
+- App lifetime, window creation, composition root, bootstrap.
+- No business logic or low-level interop details.
 
 ### SimpleRecorder.Presentation
-
-Owns the HUD view, settings surface, state transitions, and viewmodels.
+- HUD views and settings UI.
+- ViewModels, commands, reducer/state.
+- Theme resources, styles, motion tokens.
+- No direct Win32, WGC, D3D11, MF, or WASAPI calls.
 
 ### SimpleRecorder.Contracts
-
-Owns shared enums, models, and service interfaces. This is the canonical managed boundary.
+- Canonical enums, DTOs, and interfaces.
+- The public model layer shared across app, presentation, and infrastructure.
+- No WinUI references and no Win32/native details.
 
 ### SimpleRecorder.Infrastructure
-
-Implements settings persistence, tray integration, device discovery, and the adapter between managed code and the recorder backend.
+- JSON settings persistence in LocalState.
+- Tray integration via Win32 shell APIs.
+- Device discovery and C# adapter to the native DLL.
+- Mapping from canonical contracts to native POD structs.
 
 ### SimpleRecorder.Engine.Native
+- Native x64 DLL.
+- Stable exported C ABI.
+- Internal place for WGC, D3D11, Media Foundation, and WASAPI as the roadmap advances.
+- In Phase 1, only stub implementations that compile and emit realistic state changes.
 
-Scaffold for the native engine that will eventually host:
+## Canonical project rules
+- `Contracts` is the only shared model source of truth.
+- Mapping to `sr_*` native structs belongs in `Infrastructure.NativeStructMapper`.
+- Only `Infrastructure` talks to the native DLL from managed code.
+- `App` wires services together; it should not absorb infrastructure logic.
 
-- Windows.Graphics.Capture
-- Direct3D 11 processing
-- Media Foundation encoding
-- WASAPI audio capture and mixing
-
-## Interop Strategy
-
-The solution uses one interop strategy consistently:
-
-- native side exposes a C ABI
-- managed side consumes it through P/Invoke
-- contract mapping lives only in `SimpleRecorder.Infrastructure`
-
-This keeps the UI clean and prevents WinRT/native details from leaking into application code.
-
-## Current Phase
-
-Phase 1 wires the product shell around stable contracts and a stubbed recorder implementation. It intentionally avoids real capture and encode logic until the shell, state model, settings, and repository workflow are stable.
+## Future-facing defaults already decided
+- Target app type: packaged WinUI 3 desktop app.
+- Platform focus: x64 first.
+- Save path default: `Videos\SimpleRecorder`.
+- Preview remains off by default in early phases.
+- Region capture remains a UX crop/select layer over the same WGC-based pipeline.
