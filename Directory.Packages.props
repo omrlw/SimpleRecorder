@@ -6,6 +6,6 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.10" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="1.8.260101001" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="1.8.260317003" />
   </ItemGroup>
 </Project>
