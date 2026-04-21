@@ -1,5 +1,6 @@
 <Project>
   <PropertyGroup>
+    <Configurations>Debug;Release</Configurations>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

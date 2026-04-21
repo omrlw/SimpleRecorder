@@ -1,11 +1,15 @@
 using SimpleRecorder.Contracts.Enums;
 using SimpleRecorder.Contracts.Models;
 using SimpleRecorder.Infrastructure.Settings;
+using SimpleRecorder.Infrastructure.SourceSelection;
 
 namespace SimpleRecorder.Infrastructure.Native;
 
 internal sealed class ManagedNativeStubBackend
 {
+    private const string FallbackNoMediaMessage =
+        "Managed fallback is UI-only. No MP4 is produced when the native engine DLL is unavailable.";
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private RecorderStatusSnapshot _status = new(RecorderState.Idle, null, Message: "Stub backend ready.");
     private DateTimeOffset? _startedAtUtc;
@@ -29,10 +33,11 @@ internal sealed class ManagedNativeStubBackend
         try
         {
             _startedAtUtc = DateTimeOffset.UtcNow;
+            var preview = CaptureSourcePreviewCalculator.Describe(source, options);
             Publish(new RecorderStatusSnapshot(
                 RecorderState.Recording,
                 source,
-                Message: $"Recording {source.DisplayName} with {options.VideoProfile.TargetBitrateKbps / 1000.0:F1} Mbps target.",
+                Message: $"Stub fallback active for {source.DisplayName}. Requested bounds {preview.CaptureSizeLabel} @ ({preview.CaptureRegion.X}, {preview.CaptureRegion.Y}). No MP4 will be produced.",
                 StartedAtUtc: _startedAtUtc));
         }
         finally
@@ -46,7 +51,7 @@ internal sealed class ManagedNativeStubBackend
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            Publish(_status with { State = RecorderState.Paused, Message = "Recording paused." });
+            Publish(_status with { State = RecorderState.Paused, Message = "Stub fallback paused. No MP4 output is being produced." });
         }
         finally
         {
@@ -59,7 +64,7 @@ internal sealed class ManagedNativeStubBackend
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            Publish(_status with { State = RecorderState.Recording, Message = "Recording resumed." });
+            Publish(_status with { State = RecorderState.Recording, Message = "Stub fallback resumed. No MP4 output is being produced." });
         }
         finally
         {
@@ -75,40 +80,21 @@ internal sealed class ManagedNativeStubBackend
             Publish(_status with { State = RecorderState.StoppingSaving, Message = "Finalizing stub recording..." });
             await Task.Delay(180, cancellationToken).ConfigureAwait(false);
 
-            var outputPath = FileNamePolicy.BuildVideoPath(options.SaveDirectory, _status.ActiveSource?.Kind ?? CaptureSourceKind.Display);
             var duration = _startedAtUtc.HasValue ? DateTimeOffset.UtcNow - _startedAtUtc.Value : TimeSpan.Zero;
+            _startedAtUtc = null;
 
             Publish(new RecorderStatusSnapshot(
                 RecorderState.SourceSelected,
                 _status.ActiveSource,
-                CurrentOutputPath: outputPath,
-                Message: "Stub recording stopped.",
+                CurrentOutputPath: null,
+                Message: FallbackNoMediaMessage,
                 StartedAtUtc: null));
 
-            return new RecordingResult(true, outputPath, duration);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    public async Task<ScreenshotResult> CaptureScreenshotAsync(
-        CaptureSourceDescriptor source,
-        RecordingOptions options,
-        CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var outputPath = FileNamePolicy.BuildScreenshotPath(options.SaveDirectory);
-            Publish(new RecorderStatusSnapshot(
-                RecorderState.ScreenshotSuccess,
-                source,
-                CurrentOutputPath: outputPath,
-                Message: "Stub screenshot captured."));
-
-            return new ScreenshotResult(true, outputPath);
+            return new RecordingResult(
+                false,
+                null,
+                duration,
+                ErrorMessage: FallbackNoMediaMessage);
         }
         finally
         {

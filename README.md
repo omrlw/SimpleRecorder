@@ -1,110 +1,76 @@
 # SimpleRecorder
 
-SimpleRecorder is a Windows-first screen recorder designed for fast capture, a clean HUD, and a GPU-first architecture.
+Current recording/export vertical slice for a packaged WinUI 3 desktop recorder on Windows.
 
-This repository currently contains the Phase 1 foundation:
+For the current HUD and settings visual work, `SimpleRecorder.pen` is the active source of truth.
+Google Sans is the target typeface; when it is not installed locally, the app falls back to `Segoe UI Variable Display` and then `Segoe UI`.
 
-- WinUI 3 HUD shell
-- system tray integration
-- persisted settings
-- managed recorder stub wired through real contracts
-- native engine scaffold for future capture, audio, and encode work
+What is already in this repo:
 
-## Tech Stack
+- `SimpleRecorder.sln` with the five required modules
+- x64-first root build settings
+- a compact HUD shell in `SimpleRecorder.Presentation`
+- tray and settings persistence in `SimpleRecorder.Infrastructure`
+- a versioned native DLL ABI with a real recording slice behind `Infrastructure`
 
-- UI: C# + WinUI 3 + Windows App SDK
-- Application architecture: modular monolith
-- Contracts: shared .NET interfaces and models
-- Infrastructure: settings, tray, native adapter
-- Native engine path: C++/WinRT + Direct3D 11 + Windows.Graphics.Capture + Media Foundation + WASAPI
+What is real in the current slice:
 
-## Requirements
+- display, region, and best-effort window capture through the native DLL
+- live H.264/MP4 recording through `capture -> bounded queue -> encode -> live mp4 output`
+- `.srrec` session folders kept for `manifest.json` metadata and telemetry, not per-frame BMP storage
+- pause/resume/stop state changes driven by the same contract-facing interfaces used by the HUD and tray
 
-- Windows 11 recommended
+What is intentionally not implemented yet:
+
+- real microphone or loopback audio capture
+- screenshot capture; SimpleRecorder is a recorder-only product
+- preview rendering
+- advanced source-picker polish beyond the current deterministic display/window picker and precision region overlay
+
+## Structure
+
+- `src/SimpleRecorder.App`: app bootstrap, window lifetime, dependency composition
+- `src/SimpleRecorder.Presentation`: HUD views, state, viewmodels, theme
+- `src/SimpleRecorder.Contracts`: shared enums, models, interfaces
+- `src/SimpleRecorder.Infrastructure`: settings store, tray integration, native adapter
+- `src/SimpleRecorder.Engine.Native`: x64 DLL with the versioned C ABI and the minimum real capture slice
+- `build/`: setup and restore helpers
+- `docs/`: scope and architecture references
+
+## Prerequisites
+
+- Windows 10/11
 - .NET 8 SDK
-- Visual Studio 2022/2026 with:
-  - WinUI / Windows App SDK tooling
-  - Desktop C++ workload
-  - Windows 11 SDK
+- Visual Studio with WinUI / Windows App SDK tooling
+- Desktop development with C++
+- Windows 10/11 SDK
 
-## Quick Start
+Run the environment check first:
 
-### Visual Studio
+```powershell
+.\build\setup-dev-env.ps1
+```
 
-1. Open `SimpleRecorder.sln`.
-2. Set `SimpleRecorder.App` as the startup project.
-3. Select `Debug | x64`.
-4. Press `F5`.
-
-### Command Line
+Restore the managed projects from the repo root:
 
 ```powershell
 .\build\restore.ps1
-dotnet build .\SimpleRecorder.sln -c Debug -p:Platform=x64 -m:1
-.\src\SimpleRecorder.App\bin\x64\Debug\net8.0-windows10.0.19041.0\SimpleRecorder.App.exe
 ```
 
-Or use the development shortcut:
+Build the full solution with Visual Studio MSBuild. Do not use `dotnet build` for the full solution, because the repo includes a native `.vcxproj`.
+
+If MSBuild and the VC++ workload are available, build the full solution in `Debug|x64`:
 
 ```powershell
-.\build\run-dev.ps1
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
 ```
 
-## Repository Layout
+## Slice Notes
 
-- `src/SimpleRecorder.App`: WinUI application entrypoint and app lifetime
-- `src/SimpleRecorder.Presentation`: HUD views, styles, state, and viewmodels
-- `src/SimpleRecorder.Contracts`: shared contracts and recorder/settings models
-- `src/SimpleRecorder.Infrastructure`: tray, settings persistence, audio device catalog, and native bridge
-- `src/SimpleRecorder.Engine.Native`: native engine scaffold for future capture and encode work
-- `build/`: restore and environment bootstrap scripts
-- `docs/`: architecture and development documentation
-
-## Current Status
-
-Phase 1 is intentionally focused on product shell quality and architecture readiness.
-
-Implemented:
-
-- HUD window and state transitions
-- settings persistence
-- tray icon with command routing
-- recorder controller abstraction with stubbed backend
-
-Not implemented yet:
-
-- real display/window/region capture
-- real screenshot pipeline
-- hardware encode
-- loopback and microphone capture
-
-## Important Notes
-
-- The app runs unpackaged in `Debug` for fast local iteration.
-- The native project exists on disk but is not yet part of the managed solution build pipeline.
-- Settings are persisted to `%LocalAppData%\SimpleRecorder\settings.json`.
-
-## Documentation
-
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [CONTRIBUTING.md](CONTRIBUTING.md)
-
-## Publishing This Repository
-
-Before the first commit, configure your Git identity:
-
-```powershell
-git config --global user.name "Your Name"
-git config --global user.email "you@example.com"
-```
-
-Then create the first local commit and connect a remote:
-
-```powershell
-git init -b main
-git add .
-git commit -m "chore: bootstrap SimpleRecorder repository"
-git remote add origin https://github.com/<your-account>/SimpleRecorder.git
-git push -u origin main
-```
+- `Presentation` does not talk directly to Win32, Media Foundation, D3D11, or the native ABI.
+- The native engine captures frames into a bounded native queue and encodes into the MP4/H.264 output during recording.
+- The `.srrec` folder remains on disk for manifest metadata and telemetry; the contract-facing output path is the live `.mp4`.
+- Screenshot is intentionally not exposed by the app, HUD, tray, managed contracts, or managed native adapter.
+- Precision region selection is expressed in physical virtual-desktop pixels so DPI scaling, mixed-monitor layouts, and negative coordinates stay explicit at the contract boundary.
+- Audio and preview remain intentionally stubbed.
+- Settings are persisted to `%LocalAppData%\Packages\SimpleRecorder.App\LocalState\settings.json`, with migration from the older `%LocalAppData%\SimpleRecorder\settings.json` path when present.

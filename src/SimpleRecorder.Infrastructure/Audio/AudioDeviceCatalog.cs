@@ -29,7 +29,7 @@ public sealed class AudioDeviceCatalog : IAudioDeviceCatalog
         }
         catch
         {
-            // Falling back to a deterministic placeholder keeps Phase 1 stable on machines
+            // Falling back to a deterministic placeholder keeps the current slice stable on machines
             // without full device access while the native audio path is still stubbed.
         }
 

@@ -13,6 +13,8 @@ internal sealed class AppLifetime : IDisposable
     private readonly IRecorderController _recorderController;
     private readonly HudViewModel _hudViewModel;
     private MainWindow? _mainWindow;
+    private bool _isStarted;
+    private bool _isDisposed;
 
     public AppLifetime(ServiceProvider services)
     {
@@ -22,21 +24,46 @@ internal sealed class AppLifetime : IDisposable
         _hudViewModel = services.GetRequiredService<HudViewModel>();
     }
 
-    public void Start()
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        if (_isStarted)
+        {
+            return;
+        }
+
+        _isStarted = true;
         _trayService.CommandInvoked += TrayServiceOnCommandInvoked;
         _recorderController.StatusChanged += (_, snapshot) => _trayService.Update(snapshot);
         _trayService.Initialize();
+        cancellationToken.ThrowIfCancellationRequested();
+        await _hudViewModel.InitializeAsync();
+        _trayService.Update(_recorderController.CurrentStatus);
 
         _mainWindow = new MainWindow(_hudViewModel);
+        _mainWindow.Closed += MainWindowOnClosed;
         _mainWindow.Activate();
-        _ = _hudViewModel.InitializeAsync();
     }
 
     public void Dispose()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        if (_mainWindow is not null)
+        {
+            _mainWindow.Closed -= MainWindowOnClosed;
+        }
+
         _trayService.CommandInvoked -= TrayServiceOnCommandInvoked;
         _trayService.Dispose();
+        if (_recorderController is IDisposable disposableRecorder)
+        {
+            disposableRecorder.Dispose();
+        }
+
         _services.Dispose();
     }
 
@@ -48,18 +75,32 @@ internal sealed class AppLifetime : IDisposable
                 _mainWindow?.BringToFront();
                 break;
             case TrayCommand.ToggleRecording:
-                await _hudViewModel.ExecutePrimaryActionAsync().ConfigureAwait(false);
+                await _hudViewModel.ExecutePrimaryActionAsync();
                 break;
             case TrayCommand.TogglePause:
-                await _hudViewModel.TogglePauseResumeAsync().ConfigureAwait(false);
-                break;
-            case TrayCommand.CaptureScreenshot:
-                await _hudViewModel.CaptureScreenshotAsync().ConfigureAwait(false);
+                await _hudViewModel.TogglePauseResumeAsync();
                 break;
             case TrayCommand.Exit:
-                _mainWindow?.Close();
+                await ShutdownAsync();
                 Application.Current.Exit();
                 break;
         }
+    }
+
+    private async void MainWindowOnClosed(object sender, WindowEventArgs args)
+    {
+        await ShutdownAsync();
+        Application.Current.Exit();
+    }
+
+    private async Task ShutdownAsync()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        await _hudViewModel.ShutdownAsync();
+        Dispose();
     }
 }

@@ -8,6 +8,5 @@ public enum RecorderState
     Recording = 3,
     Paused = 4,
     StoppingSaving = 5,
-    ScreenshotSuccess = 6,
     ErrorNonBlocking = 7
 }

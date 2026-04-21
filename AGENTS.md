@@ -1,14 +1,14 @@
 # Simple Recorder agent guide
 
 ## Project intent
-Build and evolve **Simple Recorder** as a packaged **WinUI 3 desktop app** for Windows with a compact floating HUD, tray integration, persisted settings, and a native recording engine behind a stable C ABI. In the current phase, favor a **scaffold-first** implementation: create the solution, projects, contracts, plumbing, and stubs before adding real capture, encode, or audio work.
+Build and evolve **Simple Recorder** as a packaged **WinUI 3 desktop app** for Windows with a compact floating HUD, tray integration, persisted settings, and a native recording engine behind a stable C ABI. In the current slice, preserve and improve the existing recording/export path while continuing to add missing capabilities deliberately behind the same architecture.
 
 ## Current reality
-Treat the repository as potentially incomplete or freshly scaffolded. If expected projects or solution files are missing, create them instead of assuming they already exist. Do not silently change the architecture to fit missing files.
+Treat the repository as an in-progress recording/export vertical slice. The five-project solution already exists, the native engine already owns a real video capture/export path, and some areas still remain stubbed or partial. If expected files are missing, create them instead of bending the architecture to fit the gap.
 
 ## Source of truth
 Use these files deliberately:
-- `docs/phase-1-scope.md` for what is in and out of scope.
+- `docs/current-scope.md` for what is in and out of scope in the active slice.
 - `docs/architecture.md` for module boundaries and the target tree.
 - `docs/native-abi.md` when touching interop or the native engine.
 - `docs/ui-hud-state.md` when changing HUD states, reducer logic, or motion.
@@ -35,12 +35,11 @@ Never reference Win32, Media Foundation, D3D11, WASAPI, or native structs from `
 Never let Views or ViewModels know about the C ABI.
 Never duplicate canonical models that already belong in `Contracts`.
 
-## Phase 1 guardrails
-Until Phase 1 is explicitly complete:
-- Implement the packaged WinUI 3 shell, HUD, tray, persisted settings, contracts, and native stubs.
-- Keep recording, screenshot, encode, and audio **stubbed behind real interfaces**.
-- Do not sneak in partial “real capture” code unless the task explicitly advances the roadmap.
-- Prefer compile-safe stubs and state callbacks over speculative low-level media code.
+## Current slice guardrails
+- Preserve the packaged WinUI 3 shell, HUD, tray, persisted settings, contracts, and the existing native recording/export slice.
+- Keep incomplete areas such as audio capture, native screenshot, preview, and production source picking behind stable interfaces until the roadmap explicitly expands them.
+- Prefer compile-safe, incremental changes over speculative rewrites.
+- Do not bypass the C ABI or collapse module boundaries to move faster.
 
 ## Build and verification expectations
 When the scaffold exists, prefer verifying from the solution root.
@@ -62,4 +61,4 @@ Preserve the packaged-app direction.
 Do not replace the C ABI with C#/WinRT projection work unless the task explicitly changes the architecture.
 
 ## Done means
-A task is not done until the change respects the module boundaries, updates the nearest relevant docs when behavior or architecture changes, and leaves the repo closer to the target Phase 1 shape than before.
+A task is not done until the change respects the module boundaries, updates the nearest relevant docs when behavior or architecture changes, and leaves the repo closer to the current product slice and target architecture than before.

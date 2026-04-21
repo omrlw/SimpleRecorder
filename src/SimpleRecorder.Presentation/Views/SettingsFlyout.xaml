@@ -2,61 +2,132 @@
     x:Class="SimpleRecorder.Presentation.Views.SettingsFlyout"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:SimpleRecorder.Presentation.Converters"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
-    <Grid Width="320">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="132" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+    <UserControl.Resources>
+        <converters:OptionDisplayConverter x:Key="OptionDisplayConverter" />
+    </UserControl.Resources>
 
-        <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Frame rate" />
-        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding FrameRateOptions}" SelectedItem="{Binding SelectedFrameRate, Mode=TwoWay}" />
+    <StackPanel Width="{StaticResource HudSettingsWidth}" Spacing="{StaticResource HudSettingsRowSpacing}">
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="{Binding SelectedSourceGlyph}" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="{Binding SelectedSourceTitle}" />
+            </StackPanel>
+            <Border
+                Grid.Column="1"
+                Style="{StaticResource HudStaticValuePillStyle}">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        Style="{StaticResource HudSettingsValueTextStyle}"
+                        Text="{Binding SelectedSourcePillLabel}" />
+                    <Ellipse
+                        Grid.Column="1"
+                        Fill="{Binding SourceIndicatorBrush}"
+                        Style="{StaticResource HudInlineIndicatorDotStyle}" />
+                </Grid>
+            </Border>
+        </Grid>
 
-        <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,10,0,0" VerticalAlignment="Center" Text="Resolution" />
-        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" ItemsSource="{Binding ResolutionOptions}" SelectedItem="{Binding SelectedResolution, Mode=TwoWay}" />
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE720;" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Microphone" />
+            </StackPanel>
+            <Button
+                Grid.Column="1"
+                IsEnabled="{Binding IsSettingsEnabled}"
+                Style="{StaticResource HudSettingsValueButtonStyle}">
+                <Button.Flyout>
+                    <MenuFlyout
+                        x:Name="MicrophoneFlyout"
+                        MenuFlyoutPresenterStyle="{StaticResource HudMenuFlyoutPresenterStyle}"
+                        Opening="OnMicrophoneFlyoutOpening" />
+                </Button.Flyout>
+                <TextBlock
+                    Style="{StaticResource HudSettingsValueTextStyle}"
+                    Text="{Binding SelectedMicrophoneDisplayName}" />
+            </Button>
+        </Grid>
 
-        <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,10,0,0" VerticalAlignment="Center" Text="Quality" />
-        <ComboBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" ItemsSource="{Binding QualityOptions}" SelectedItem="{Binding SelectedQuality, Mode=TwoWay}" />
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE713;" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Quality" />
+            </StackPanel>
+            <Button
+                Grid.Column="1"
+                IsEnabled="{Binding IsSettingsEnabled}"
+                Style="{StaticResource HudSettingsValueButtonStyle}">
+                <Button.Flyout>
+                    <MenuFlyout
+                        x:Name="FrameRateFlyout"
+                        MenuFlyoutPresenterStyle="{StaticResource HudMenuFlyoutPresenterStyle}"
+                        Opening="OnFrameRateFlyoutOpening" />
+                </Button.Flyout>
+                <TextBlock
+                    Style="{StaticResource HudSettingsValueTextStyle}"
+                    Text="{Binding SelectedFrameRate, Converter={StaticResource OptionDisplayConverter}}" />
+            </Button>
+        </Grid>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,10,0,0" VerticalAlignment="Center" Text="Countdown" />
-        <ComboBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" ItemsSource="{Binding CountdownOptions}" SelectedItem="{Binding SelectedCountdown, Mode=TwoWay}" />
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE823;" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Countdown" />
+            </StackPanel>
+            <Button
+                Grid.Column="1"
+                IsEnabled="{Binding IsSettingsEnabled}"
+                Style="{StaticResource HudSettingsValueButtonStyle}">
+                <Button.Flyout>
+                    <MenuFlyout
+                        x:Name="CountdownFlyout"
+                        MenuFlyoutPresenterStyle="{StaticResource HudMenuFlyoutPresenterStyle}"
+                        Opening="OnCountdownFlyoutOpening" />
+                </Button.Flyout>
+                <TextBlock
+                    Style="{StaticResource HudSettingsValueTextStyle}"
+                    Text="{Binding SelectedCountdown, Converter={StaticResource OptionDisplayConverter}}" />
+            </Button>
+        </Grid>
 
-        <CheckBox Grid.Row="4" Grid.ColumnSpan="2" Margin="0,12,0,0" IsChecked="{Binding IsSystemAudioEnabled, Mode=TwoWay}">
-            <TextBlock Text="System audio" />
-        </CheckBox>
-
-        <CheckBox Grid.Row="5" Grid.ColumnSpan="2" Margin="0,6,0,0" IsChecked="{Binding IsMicrophoneEnabled, Mode=TwoWay}">
-            <TextBlock Text="Microphone" />
-        </CheckBox>
-
-        <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,10,0,0" VerticalAlignment="Center" Text="Mic device" />
-        <ComboBox
-            Grid.Row="6"
-            Grid.Column="1"
-            Margin="0,10,0,0"
-            DisplayMemberPath="DisplayName"
-            ItemsSource="{Binding Microphones}"
-            SelectedValue="{Binding SelectedMicrophoneDeviceId, Mode=TwoWay}"
-            SelectedValuePath="Id" />
-
-        <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,10,0,0" VerticalAlignment="Center" Text="Save to" />
-        <TextBox Grid.Row="7" Grid.Column="1" Margin="0,10,0,0" Text="{Binding SaveDirectory, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-        <CheckBox Grid.Row="8" Grid.ColumnSpan="2" Margin="0,12,0,0" IsChecked="{Binding RememberLastSource, Mode=TwoWay}">
-            <TextBlock Text="Remember last source" />
-        </CheckBox>
-    </Grid>
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE71D;" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Save to" />
+            </StackPanel>
+            <Border Grid.Column="1" Style="{StaticResource HudStaticValuePillStyle}">
+                <TextBlock
+                    Style="{StaticResource HudSettingsValueTextStyle}"
+                    Text="{Binding SaveDirectoryDisplay, Mode=OneWay}" />
+            </Border>
+        </Grid>
+    </StackPanel>
 </UserControl>

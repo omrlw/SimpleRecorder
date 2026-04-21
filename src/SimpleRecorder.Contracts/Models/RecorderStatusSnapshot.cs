@@ -8,4 +8,5 @@ public sealed record RecorderStatusSnapshot(
     string? CurrentOutputPath = null,
     string? Message = null,
     int CountdownRemainingSeconds = 0,
-    DateTimeOffset? StartedAtUtc = null);
+    DateTimeOffset? StartedAtUtc = null,
+    RecordingSessionTelemetry? Telemetry = null);

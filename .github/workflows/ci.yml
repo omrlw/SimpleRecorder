@@ -23,10 +23,13 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Restore
         shell: pwsh
         run: .\build\restore.ps1
 
       - name: Build Debug x64
         shell: pwsh
-        run: dotnet build .\SimpleRecorder.sln -c Debug -p:Platform=x64 -m:1 --no-restore
+        run: msbuild .\SimpleRecorder.sln /p:Configuration=Debug /p:Platform=x64 /m:1

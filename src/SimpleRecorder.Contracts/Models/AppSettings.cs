@@ -4,17 +4,17 @@ namespace SimpleRecorder.Contracts.Models;
 
 public sealed class AppSettings
 {
-    public FrameRateOption FrameRate { get; set; } = FrameRateOption.Fps60;
+    public FrameRateOption FrameRate { get; set; } = FrameRateOption.Fps120;
 
     public ResolutionOption Resolution { get; set; } = ResolutionOption.Auto;
 
     public QualityPreset QualityPreset { get; set; } = QualityPreset.Balanced;
 
-    public CountdownOption Countdown { get; set; } = CountdownOption.Off;
+    public CountdownOption Countdown { get; set; } = CountdownOption.FiveSeconds;
 
-    public bool SystemAudioEnabled { get; set; } = true;
+    public bool SystemAudioEnabled { get; set; } = false;
 
-    public bool MicrophoneEnabled { get; set; }
+    public bool MicrophoneEnabled { get; set; } = false;
 
     public string? MicrophoneDeviceId { get; set; }
 

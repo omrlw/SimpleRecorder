@@ -11,7 +11,7 @@ What should be true when the task is complete?
 
 ## Constraints
 - Keep module boundaries intact.
-- Keep Phase 1 scope unless explicitly expanding the roadmap.
+- Keep `docs/current-scope.md` unless explicitly expanding the roadmap.
 - Prefer contract-first and stub-safe changes.
 
 ## Files likely to change

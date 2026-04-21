@@ -4,8 +4,8 @@
 This project owns the native x64 DLL and exported C ABI.
 It is the only place where future WGC, D3D11, Media Foundation, and WASAPI implementation details should live.
 
-## Phase 1 rule
-In Phase 1, prefer compile-safe stubs that honor the ABI and simulate realistic state changes. Do not half-implement real capture or encode paths unless the task explicitly advances the roadmap.
+## Current slice rule
+Preserve the existing ABI and real video capture/export path. Extend audio, preview, native screenshot, and other low-level media work deliberately; do not regress the engine back to stub-only behavior or introduce half-integrated subsystems.
 
 ## ABI rules
 - Keep exports coarse-grained and versionable.

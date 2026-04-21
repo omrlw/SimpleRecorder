@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <RootNamespace>SimpleRecorder.App</RootNamespace>
     <UseWinUI>true</UseWinUI>
@@ -35,4 +35,13 @@
   <ItemGroup>
     <Content Include="..\..\Audio\*.wav" Link="Audio\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="CopyNativeStub" AfterTargets="Build">
+    <ItemGroup>
+      <NativeStubArtifact Include="..\SimpleRecorder.Engine.Native\bin\$(Platform)\$(Configuration)\SimpleRecorder.Engine.Native.dll" Condition="Exists('..\SimpleRecorder.Engine.Native\bin\$(Platform)\$(Configuration)\SimpleRecorder.Engine.Native.dll')" />
+      <NativeStubArtifact Include="..\SimpleRecorder.Engine.Native\bin\$(Platform)\$(Configuration)\SimpleRecorder.Engine.Native.pdb" Condition="Exists('..\SimpleRecorder.Engine.Native\bin\$(Platform)\$(Configuration)\SimpleRecorder.Engine.Native.pdb')" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(NativeStubArtifact)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'@(NativeStubArtifact)' != ''" />
+  </Target>
 </Project>

@@ -31,8 +31,7 @@ public sealed class TrayIconService : ITrayService
     private const uint CommandShowHud = 1001;
     private const uint CommandToggleRecording = 1002;
     private const uint CommandTogglePause = 1003;
-    private const uint CommandScreenshot = 1004;
-    private const uint CommandExit = 1005;
+    private const uint CommandExit = 1004;
 
     private readonly Guid _trayGuid = new("5F69B111-66E1-4D3D-BCE1-56A1C0A5937D");
     private readonly TrayMessageWindow _messageWindow = new();
@@ -114,9 +113,6 @@ public sealed class TrayIconService : ITrayService
                 case CommandTogglePause:
                     CommandInvoked?.Invoke(this, TrayCommand.TogglePause);
                     break;
-                case CommandScreenshot:
-                    CommandInvoked?.Invoke(this, TrayCommand.CaptureScreenshot);
-                    break;
                 case CommandExit:
                     CommandInvoked?.Invoke(this, TrayCommand.Exit);
                     break;
@@ -139,7 +135,6 @@ public sealed class TrayIconService : ITrayService
 
             var pauseFlags = _snapshot.State is RecorderState.Recording or RecorderState.Paused ? MF_STRING : MF_STRING | MF_GRAYED;
             AppendMenu(menu, pauseFlags, CommandTogglePause, _snapshot.State == RecorderState.Paused ? "Resume" : "Pause");
-            AppendMenu(menu, MF_STRING, CommandScreenshot, "Take screenshot");
             AppendMenu(menu, MF_SEPARATOR, 0, string.Empty);
             AppendMenu(menu, MF_STRING, CommandExit, "Quit");
 

@@ -20,7 +20,11 @@ public static class QualityProfileMapper
             _ => 10_000
         };
 
-        if (frameRate == FrameRateOption.Fps60)
+        if (frameRate == FrameRateOption.Fps120)
+        {
+            baseBitrate = (int)(baseBitrate * 2.1);
+        }
+        else if (frameRate == FrameRateOption.Fps60)
         {
             baseBitrate = (int)(baseBitrate * 1.6);
         }

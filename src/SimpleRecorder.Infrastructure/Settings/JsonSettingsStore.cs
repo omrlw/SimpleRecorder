@@ -1,22 +1,23 @@
 using System.Text.Json;
 using SimpleRecorder.Contracts.Models;
 using SimpleRecorder.Contracts.Services;
+using Windows.Storage;
 
 namespace SimpleRecorder.Infrastructure.Settings;
 
 public sealed class JsonSettingsStore : ISettingsStore
 {
+    private const string PackageName = "SimpleRecorder.App";
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _settingsPath;
 
     public JsonSettingsStore()
     {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SimpleRecorder");
+        var root = ResolveSettingsRoot();
 
         Directory.CreateDirectory(root);
         _settingsPath = Path.Combine(root, "settings.json");
+        TryMigrateLegacySettings(_settingsPath);
     }
 
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
@@ -26,7 +27,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             if (!File.Exists(_settingsPath))
             {
-                var defaults = new AppSettings();
+                var defaults = NormalizeForCurrentSlice(new AppSettings(), out _);
                 await SaveCoreAsync(defaults, cancellationToken).ConfigureAwait(false);
                 return defaults;
             }
@@ -38,7 +39,13 @@ public sealed class JsonSettingsStore : ISettingsStore
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            return settings ?? new AppSettings();
+            var normalized = NormalizeForCurrentSlice(settings ?? new AppSettings(), out var wasNormalized);
+            if (settings is null || wasNormalized)
+            {
+                await SaveCoreAsync(normalized, cancellationToken).ConfigureAwait(false);
+            }
+
+            return normalized;
         }
         finally
         {
@@ -51,7 +58,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await SaveCoreAsync(settings, cancellationToken).ConfigureAwait(false);
+            await SaveCoreAsync(NormalizeForCurrentSlice(settings, out _), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -68,5 +75,56 @@ public sealed class JsonSettingsStore : ISettingsStore
                 SettingsSerializerContext.Default.AppSettings,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static string ResolveSettingsRoot()
+    {
+        try
+        {
+            return ApplicationData.Current.LocalFolder.Path;
+        }
+        catch
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Packages",
+                PackageName,
+                "LocalState");
+        }
+    }
+
+    private static void TryMigrateLegacySettings(string destinationPath)
+    {
+        if (File.Exists(destinationPath))
+        {
+            return;
+        }
+
+        var legacyPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SimpleRecorder",
+            "settings.json");
+
+        if (!File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        File.Copy(legacyPath, destinationPath, overwrite: false);
+    }
+
+    private static AppSettings NormalizeForCurrentSlice(AppSettings settings, out bool wasNormalized)
+    {
+        var needsNormalization = settings.SystemAudioEnabled || settings.MicrophoneEnabled || settings.MicrophoneDeviceId is not null;
+        wasNormalized = needsNormalization;
+        if (!needsNormalization)
+        {
+            return settings;
+        }
+
+        settings.SystemAudioEnabled = false;
+        settings.MicrophoneEnabled = false;
+        settings.MicrophoneDeviceId = null;
+        return settings;
     }
 }

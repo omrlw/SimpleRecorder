@@ -7,22 +7,11 @@
     xmlns:views="using:SimpleRecorder.Presentation.Views"
     mc:Ignorable="d">
     <Grid Background="Transparent">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="16" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        <Border x:Name="DragRegion" Background="Transparent" />
 
-        <Border x:Name="DragRegion" Grid.Row="0" Background="Transparent" />
-
-        <Border
-            Grid.Row="1"
-            Margin="8,0,8,8"
-            Background="#0D101010"
-            BorderBrush="#1FFFFFFF"
-            BorderThickness="1"
-            CornerRadius="32"
-            Padding="0">
-            <views:HudView x:Name="HudRoot" />
-        </Border>
+        <views:HudView
+            x:Name="HudRoot"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch" />
     </Grid>
 </Window>

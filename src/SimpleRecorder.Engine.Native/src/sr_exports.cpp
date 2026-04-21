@@ -1,5 +1,5 @@
 #include "pch.h"
 
-// Phase 1 keeps the native surface intentionally small. The engine is scaffolded as a
-// DLL boundary so we can add the real C++/WinRT, WGC, D3D11, Media Foundation, and
-// WASAPI implementation in Phase 2 without changing the managed interop strategy.
+// Keep the exported surface intentionally small. The current slice already uses this
+// DLL boundary for real capture/export work while leaving room for later audio,
+// preview, and other media features without changing the managed interop strategy.

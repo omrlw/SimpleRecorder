@@ -17,9 +17,4 @@ public interface IRecorderController
     Task ResumeAsync(CancellationToken cancellationToken = default);
 
     Task<RecordingResult> StopAsync(CancellationToken cancellationToken = default);
-
-    Task<ScreenshotResult> CaptureScreenshotAsync(
-        CaptureSourceDescriptor source,
-        RecordingOptions options,
-        CancellationToken cancellationToken = default);
 }

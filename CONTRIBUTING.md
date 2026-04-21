@@ -12,8 +12,10 @@
 3. Build the solution:
 
 ```powershell
-dotnet build .\SimpleRecorder.sln -c Debug -p:Platform=x64 -m:1
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
 ```
+
+Use Visual Studio MSBuild for the full solution. `dotnet build` does not cover the native `.vcxproj`.
 
 4. Run the app from Visual Studio with `Debug | x64` and `SimpleRecorder.App` as the startup project.
 

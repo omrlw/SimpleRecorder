@@ -1,11 +1,32 @@
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="HudSurfaceBrush" Color="#FF161616" />
-    <SolidColorBrush x:Key="HudSurfaceAltBrush" Color="#FF262626" />
-    <SolidColorBrush x:Key="HudStrokeBrush" Color="#1FFFFFFF" />
-    <SolidColorBrush x:Key="HudLightBrush" Color="#FFE8E3DB" />
-    <SolidColorBrush x:Key="HudLightBorderBrush" Color="#12000000" />
-    <SolidColorBrush x:Key="HudAccentBrush" Color="#FFFF3040" />
-    <SolidColorBrush x:Key="HudSuccessBrush" Color="#FFE3F5EC" />
+    <SolidColorBrush x:Key="HudSurfaceBrush" Color="#FF262626" />
+    <SolidColorBrush x:Key="HudSurfaceAltBrush" Color="#FF000000" />
+    <SolidColorBrush x:Key="HudSurfaceHoverBrush" Color="#FF303030" />
+    <SolidColorBrush x:Key="HudSurfacePressedBrush" Color="#FF1B1B1B" />
+    <SolidColorBrush x:Key="HudSurfaceMutedBrush" Color="#FF171717" />
+    <SolidColorBrush x:Key="HudStrokeBrush" Color="#00000000" />
+    <SolidColorBrush x:Key="HudSurfaceStrokeBrush" Color="#1AFFFFFF" />
+    <SolidColorBrush x:Key="HudLightBrush" Color="#FFD9D9D9" />
+    <SolidColorBrush x:Key="HudLightHoverBrush" Color="#FFE4E4E4" />
+    <SolidColorBrush x:Key="HudLightPressedBrush" Color="#FFCACACA" />
+    <SolidColorBrush x:Key="HudLightBorderBrush" Color="#15000000" />
+    <SolidColorBrush x:Key="HudAccentBrush" Color="#FFFB2C36" />
+    <SolidColorBrush x:Key="HudAccentDarkBrush" Color="#FFC7222B" />
+    <SolidColorBrush x:Key="HudAccentMutedBrush" Color="#66FB2C36" />
+    <SolidColorBrush x:Key="HudSuccessBrush" Color="#FFE2E2E2" />
+    <SolidColorBrush x:Key="HudWarningBrush" Color="#FF262626" />
+    <SolidColorBrush x:Key="HudPositiveBrush" Color="#FF46D478" />
+    <SolidColorBrush x:Key="HudTextOnDarkBrush" Color="#FFF4F4F4" />
+    <SolidColorBrush x:Key="HudTextOnLightBrush" Color="#FF171717" />
+    <SolidColorBrush x:Key="HudTextMutedOnLightBrush" Color="#99000000" />
+    <SolidColorBrush x:Key="HudTextMutedOnDarkBrush" Color="#B8F4F4F4" />
+    <SolidColorBrush x:Key="HudInteractiveStrokeBrush" Color="#40FFFFFF" />
+    <SolidColorBrush x:Key="HudPressedStrokeBrush" Color="#80FFFFFF" />
+    <SolidColorBrush x:Key="HudFocusBrush" Color="#B3FB2C36" />
+    <SolidColorBrush x:Key="HudSourceButtonSelectedBrush" Color="#FF111111" />
+    <SolidColorBrush x:Key="HudSourceButtonSelectedHoverBrush" Color="#FF1A1A1A" />
+    <SolidColorBrush x:Key="HudSourceButtonSelectedPressedBrush" Color="#FF0C0C0C" />
+    <SolidColorBrush x:Key="HudSourceButtonSelectedStrokeBrush" Color="#59FB2C36" />
 </ResourceDictionary>
