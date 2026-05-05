@@ -1,61 +1,46 @@
-# Simple Recorder agent guide
+# SimpleRecorder Agent Guide
 
-## Project intent
-Build and evolve **Simple Recorder** as a packaged **WinUI 3 desktop app** for Windows with a compact floating HUD, tray integration, persisted settings, and a native recording engine behind a stable C ABI. In the current slice, preserve and improve the existing recording/export path while continuing to add missing capabilities deliberately behind the same architecture.
+## Purpose
+SimpleRecorder is a minimal, high-performance Windows recorder. Keep the product simple on the surface and professional inside: compact HUD, no watermark, no artificial recording limit, H.264 MP4 output, GPU-first native recording, and clear telemetry.
 
-## Current reality
-Treat the repository as an in-progress recording/export vertical slice. The five-project solution already exists, the native engine already owns a real video capture/export path, and some areas still remain stubbed or partial. If expected files are missing, create them instead of bending the architecture to fit the gap.
+## Product Rules
+- Record display, window, and region sources.
+- Do not add camera recording.
+- Do not add screenshot capture as a product feature.
+- Keep H.264 as the active product codec for compatibility.
+- Prefer GPU capture/processing and hardware encode when Windows exposes a compatible NVIDIA, AMD, Intel, or platform encoder.
+- Audio is part of the product direction: desktop audio, microphone audio, both, or neither. The current native audio path is not complete, so keep audio work behind contracts and stable interfaces until implemented.
+- UI work follows `SimpleRecorder.pen` for design, components, and typography.
 
-## Source of truth
-Use these files deliberately:
-- `docs/current-scope.md` for what is in and out of scope in the active slice.
-- `docs/ARCHITECTURE.md` for module boundaries and the target tree.
-- `docs/native-abi.md` when touching interop or the native engine.
-- `docs/ui-hud-state.md` when changing HUD states, reducer logic, or motion.
+## Project Shape
+- `SimpleRecorder.App`: app startup, window lifetime, dependency composition.
+- `SimpleRecorder.Presentation`: HUD, settings UI, viewmodels, reducer/state, theme, motion.
+- `SimpleRecorder.Contracts`: canonical shared enums, DTOs, models, and service interfaces.
+- `SimpleRecorder.Infrastructure`: settings, tray, source selection, audio device discovery, native adapter.
+- `SimpleRecorder.Engine.Native`: versioned C ABI, native capture, GPU frame processing, H.264 encoding, manifest telemetry.
 
-## Required architecture
-Keep the solution split into these modules:
-- `SimpleRecorder.App`
-- `SimpleRecorder.Presentation`
-- `SimpleRecorder.Contracts`
-- `SimpleRecorder.Infrastructure`
-- `SimpleRecorder.Engine.Native`
+## Boundaries
+- Keep canonical shared models in `Contracts`.
+- Keep Views and ViewModels away from the native ABI.
+- Keep Win32, WGC, DXGI, D3D11, Media Foundation, WASAPI, and `sr_*` structs out of `Presentation`.
+- Keep managed native interop under `Infrastructure/Native`.
+- Keep native media implementation inside `Engine.Native`.
+- Do not collapse the five projects.
 
-Do not collapse these layers just to move faster.
+## Documentation Map
+- `README.md`: product summary and current state.
+- `docs/ARCHITECTURE.md`: module boundaries and pipeline shape.
+- `docs/native-abi.md`: C ABI, native behavior, and manifest notes.
+- `docs/ui-hud-state.md`: HUD state, motion, and design source.
+- `docs/DEVELOPMENT.md`: setup, build, run, and verification.
 
-## Non-negotiable boundaries
-- `Presentation` owns XAML views, viewmodels, reducer/state, theme, and UI motion.
-- `Contracts` is the canonical public model layer shared by UI and services.
-- `Infrastructure` owns settings persistence, tray integration, device discovery, and the adapter to the native engine.
-- `Engine.Native` exposes a **versioned C ABI** and may use Windows native/media APIs internally.
-- `App` composes dependencies and app/window lifetime.
+Keep nearby docs updated when behavior, architecture, ABI, or product direction changes.
 
-Never reference Win32, Media Foundation, D3D11, WASAPI, or native structs from `Presentation`.
-Never let Views or ViewModels know about the C ABI.
-Never duplicate canonical models that already belong in `Contracts`.
+## Verification
+From the solution root, prefer:
+- Docs only: review Markdown and run `git diff --check`.
+- Managed/UI changes: build `Debug | x64`.
+- Native engine, ABI, manifest, or adapter changes: build `Debug | x64` and `Release | x64`.
+- Startup, HUD, tray, settings, or recording behavior: run the app when local Windows tooling is available.
 
-## Current slice guardrails
-- Preserve the packaged WinUI 3 shell, HUD, tray, persisted settings, contracts, and the existing native recording/export slice.
-- Keep incomplete areas such as audio capture, preview, and production source picking behind stable interfaces until the roadmap explicitly expands them.
-- Treat screenshot capture as out of product scope, not as a dormant feature.
-- Prefer compile-safe, incremental changes over speculative rewrites.
-- Do not bypass the C ABI or collapse module boundaries to move faster.
-
-## Build and verification expectations
-When the scaffold exists, prefer verifying from the solution root.
-Typical checks:
-- restore solution dependencies
-- build Debug x64
-- run the app if the requested change affects startup, HUD behavior, tray behavior, or settings persistence
-
-If the local environment is missing required Windows/Visual Studio tooling, report the missing prerequisite clearly instead of claiming success.
-
-## Change discipline
-Prefer small, reviewable edits.
-Keep naming consistent with the docs.
-Preserve x64-first assumptions.
-Preserve the packaged-app direction.
-Do not replace the C ABI with C#/WinRT projection work unless the task explicitly changes the architecture.
-
-## Done means
-A task is not done until the change respects the module boundaries, updates the nearest relevant docs when behavior or architecture changes, and leaves the repo closer to the current product slice and target architecture than before.
+If Visual Studio, Windows App SDK tooling, Desktop C++, or Windows SDK is missing, report the missing prerequisite clearly.

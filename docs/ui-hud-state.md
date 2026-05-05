@@ -1,10 +1,16 @@
-# HUD state and motion
+# HUD State And Motion
 
 `SimpleRecorder.pen` is the active visual source for HUD and settings work. Legacy `.fig` files are archival only.
 
-## State model
-Keep durable session state separate from transient feedback.
+## UI Direction
+- Minimal recorder HUD, not a dashboard.
+- Fast source selection and recording controls.
+- Clear quality, resolution, countdown, and output state.
+- Audio controls should support desktop audio, microphone, both, or neither once the native audio path is ready.
+- No camera controls.
+- No screenshot controls.
 
+## State Model
 Session states:
 - `Idle`
 - `SourceSelected`
@@ -17,22 +23,17 @@ Feedback states:
 - `None`
 - `NonBlockingError`
 
-## Reducer rules
+## Reducer Rules
 - Selecting or restoring a valid source moves to `SourceSelected`.
 - Record moves to `Countdown` only when countdown is enabled.
 - Record moves directly to `Recording` when countdown is off.
-- Pause/resume only affect session state.
+- Pause and resume only affect session state.
 - Stop moves through `StoppingSaving`, then returns to `SourceSelected`.
 - Non-fatal errors appear as feedback without replacing session state.
-- Secondary action is pause/resume and is hidden outside recording/paused states.
 
-## HUD behavior
-- Prefer a compact operator panel over decorative presentation.
-- Show source, recording options, and telemetry when they improve observability.
-- During recording, keep motion minimal and functional.
+## Motion
+- Keep motion short and functional.
 - Respect reduced-motion settings.
-
-## Motion tokens
 - HUD enter/exit: 180 ms.
 - Settings reveal: 160 ms.
 - Recording/paused transition: 120 ms.

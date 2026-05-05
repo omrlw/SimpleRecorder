@@ -6,32 +6,32 @@
 - Visual Studio with Windows App SDK tooling.
 - Desktop development with C++.
 - Windows SDK.
-- Windows App Runtime matching the configured Windows App SDK when launching unpackaged output.
+- Matching Windows App Runtime when launching unpackaged output.
 
-## Restore And Build
+## Restore
 ```powershell
 .\build\setup-dev-env.ps1
 .\build\restore.ps1
-& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
-& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Release /p:Platform=x64
 ```
 
-Use Visual Studio MSBuild for full solution builds. `dotnet build` is useful for managed-only checks, but it does not reliably build `SimpleRecorder.Engine.Native`.
+## Build
+Use Visual Studio MSBuild for the full solution because the repo contains `SimpleRecorder.Engine.Native.vcxproj`.
+
+```powershell
+msbuild .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
+msbuild .\SimpleRecorder.sln /restore /p:Configuration=Release /p:Platform=x64
+```
+
+`dotnet build` is useful only for managed-only checks.
 
 ## Run
-From Visual Studio:
-1. Open `SimpleRecorder.sln`.
-2. Set `SimpleRecorder.App` as startup project.
-3. Select `Debug | x64`.
-4. Run.
-
-From PowerShell:
-
 ```powershell
 .\build\run-dev.ps1
 ```
 
-If launch fails with `REGDB_E_CLASSNOTREG` from `DeploymentManagerAutoInitializer`, the Windows App Runtime is not registered for the current launch mode.
+Or open `SimpleRecorder.sln`, set `SimpleRecorder.App` as the startup project, select `Debug | x64`, and run from Visual Studio.
+
+If launch fails with `REGDB_E_CLASSNOTREG` from Windows App Runtime initialization, install or register the matching Windows App Runtime for the selected launch mode.
 
 ## Local Data
 - Packaged settings: `%LocalAppData%\Packages\SimpleRecorder.App\LocalState\settings.json`
@@ -40,14 +40,9 @@ If launch fails with `REGDB_E_CLASSNOTREG` from `DeploymentManagerAutoInitialize
 - Session metadata: `%UserProfile%\Videos\SimpleRecorder\*.srrec\manifest.json`
 - Audio assets: `Audio/`
 
-## Verification By Change Type
+## Verification
 - Docs only: review Markdown and run `git diff --check`.
-- Contracts, Infrastructure, or Presentation: build `Debug | x64`.
-- Native engine, ABI, manifest, or adapter: build `Debug | x64` and `Release | x64`.
-- Startup, HUD, tray, or settings: launch the app.
-- Recording pipeline: record, pause, resume, stop, then inspect `.mp4` and `.srrec/manifest.json`.
-
-## Native Engine Notes
-`SimpleRecorder.Engine.Native` compiles `src/engine.cpp` as the ABI/export translation unit. Implementation code lives in responsibility-sized `src/engine/*.inl` partitions included by `engine.cpp`.
-
-Keep WGC/DXGI/GDI capture, D3D11 frame processing, Media Foundation encoding, hardware attribution, and manifest telemetry inside the native engine. Keep C ABI structs POD-friendly and versioned.
+- Managed/UI changes: build `Debug | x64`.
+- Native engine, ABI, manifest, or adapter changes: build `Debug | x64` and `Release | x64`.
+- Startup, HUD, tray, settings, or recording changes: launch the app if local tooling is available.
+- Recording pipeline changes: record, pause, resume, stop, then inspect the `.mp4` and `.srrec/manifest.json`.
