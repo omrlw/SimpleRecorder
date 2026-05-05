@@ -85,6 +85,29 @@ public sealed partial class SettingsFlyout
         }
     }
 
+    private void OnEncoderPreferenceFlyoutOpening(object sender, object e)
+    {
+        if (sender is not MenuFlyout flyout || ViewModel is null)
+        {
+            return;
+        }
+
+        flyout.Items.Clear();
+        foreach (var option in ViewModel.EncoderPreferenceOptions)
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = FormatOption(option),
+                IsChecked = option == ViewModel.SelectedEncoderPreference
+            };
+
+            ApplyMenuItemStyle(item);
+            var selectedOption = option;
+            item.Click += (_, _) => ViewModel.SelectedEncoderPreference = selectedOption;
+            flyout.Items.Add(item);
+        }
+    }
+
     private string FormatOption(object value) =>
         _optionDisplayConverter.Convert(value, typeof(string), string.Empty, string.Empty)?.ToString() ?? string.Empty;
 

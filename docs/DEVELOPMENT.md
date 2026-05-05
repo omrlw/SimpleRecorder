@@ -1,81 +1,53 @@
-# Development Guide
+# Development
 
-## Prerequisites
+## Requirements
+- Windows 10/11.
+- .NET 8 SDK.
+- Visual Studio with Windows App SDK tooling.
+- Desktop development with C++.
+- Windows SDK.
+- Windows App Runtime matching the configured Windows App SDK when launching unpackaged output.
 
-- Windows 11 recommended
-- .NET 8 SDK
-- Visual Studio 2022/2026
-- Windows App SDK tooling
-- Desktop C++ workload
-- Windows 11 SDK
-
-## Restore
-
+## Restore And Build
 ```powershell
+.\build\setup-dev-env.ps1
 .\build\restore.ps1
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Release /p:Platform=x64
 ```
 
-## Build
+Use Visual Studio MSBuild for full solution builds. `dotnet build` is useful for managed-only checks, but it does not reliably build `SimpleRecorder.Engine.Native`.
 
-```powershell
-& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
-```
-
-Use Visual Studio MSBuild for the full solution. `dotnet build` does not build the native `.vcxproj`.
-
-## Run in Visual Studio
-
+## Run
+From Visual Studio:
 1. Open `SimpleRecorder.sln`.
-2. Set `SimpleRecorder.App` as the startup project.
+2. Set `SimpleRecorder.App` as startup project.
 3. Select `Debug | x64`.
-4. Press `F5`.
+4. Run.
 
-## Run from the Command Line
-
-```powershell
-.\src\SimpleRecorder.App\bin\x64\Debug\net8.0-windows10.0.26100.0\SimpleRecorder.App.exe
-```
-
-## One-Step Local Run
+From PowerShell:
 
 ```powershell
 .\build\run-dev.ps1
 ```
 
-## Native Engine Status
+If launch fails with `REGDB_E_CLASSNOTREG` from `DeploymentManagerAutoInitializer`, the Windows App Runtime is not registered for the current launch mode.
 
-`SimpleRecorder.Engine.Native` is part of the solution build path and backs the current recording/export slice.
-When the native DLL is unavailable, the app can still fall back to the managed stub backend for local development, but that is no longer the primary path.
-
-## Local Files
-
-- Persisted settings: `%LocalAppData%\Packages\SimpleRecorder.App\LocalState\settings.json`
+## Local Data
+- Packaged settings: `%LocalAppData%\Packages\SimpleRecorder.App\LocalState\settings.json`
 - Legacy settings migration source: `%LocalAppData%\SimpleRecorder\settings.json`
+- Default recordings: `%UserProfile%\Videos\SimpleRecorder`
+- Session metadata: `%UserProfile%\Videos\SimpleRecorder\*.srrec\manifest.json`
 - Audio assets: `Audio/`
 
-## Publish to GitHub
+## Verification By Change Type
+- Docs only: review Markdown and run `git diff --check`.
+- Contracts, Infrastructure, or Presentation: build `Debug | x64`.
+- Native engine, ABI, manifest, or adapter: build `Debug | x64` and `Release | x64`.
+- Startup, HUD, tray, or settings: launch the app.
+- Recording pipeline: record, pause, resume, stop, then inspect `.mp4` and `.srrec/manifest.json`.
 
-If the repository does not exist yet on GitHub:
+## Native Engine Notes
+`SimpleRecorder.Engine.Native` compiles `src/engine.cpp` as the ABI/export translation unit. Implementation code lives in responsibility-sized `src/engine/*.inl` partitions included by `engine.cpp`.
 
-1. Create an empty repository in the GitHub web UI.
-2. Copy its HTTPS or SSH URL.
-3. Run:
-
-```powershell
-git init -b main
-git add .
-git commit -m "chore: bootstrap SimpleRecorder repository"
-git remote add origin https://github.com/<your-account>/SimpleRecorder.git
-git push -u origin main
-```
-
-If Git asks for your identity first:
-
-```powershell
-git config --global user.name "Your Name"
-git config --global user.email "you@example.com"
-```
-
-## CI
-
-The repository includes a Windows GitHub Actions workflow that restores and builds the solution in `Debug | x64` with Visual Studio MSBuild.
+Keep WGC/DXGI/GDI capture, D3D11 frame processing, Media Foundation encoding, hardware attribution, and manifest telemetry inside the native engine. Keep C ABI structs POD-friendly and versioned.

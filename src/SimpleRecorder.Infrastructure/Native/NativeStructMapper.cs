@@ -57,7 +57,9 @@ internal static class NativeStructMapper
             (int)options.QualityPreset,
             (int)options.Countdown,
             options.IsSystemAudioEnabled ? 1 : 0,
-            options.IsMicrophoneEnabled ? 1 : 0);
+            options.IsMicrophoneEnabled ? 1 : 0,
+            (int)options.EncoderPreference,
+            (int)options.VideoCodec);
 
     internal static RecorderState ToContractState(NativeMethods.SrRecorderState state) =>
         state switch

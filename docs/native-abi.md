@@ -1,61 +1,54 @@
 # Native ABI
 
-## Why this boundary exists
-Use a **versioned C ABI** between C# and the native engine.
-This keeps the managed UI clean, limits build complexity, and avoids projecting native/media concepts directly into the UI layer.
+SimpleRecorder uses a versioned C ABI between managed code and the native recorder.
 
-## Managed side rules
-- Use `LibraryImport` for native entry points.
-- Keep all native interop declarations inside `SimpleRecorder.Infrastructure/Native`.
-- Map managed contract models to native POD structs in one place.
-- Never expose `sr_*` structs above `Infrastructure`.
+## Current contract
+- ABI version: `3`.
+- Struct version: `2`.
+- Managed declarations live in `SimpleRecorder.Infrastructure/Native`.
+- `Infrastructure.NativeStructMapper` maps contracts to `sr_*` POD structs.
+- No `sr_*` type is exposed above `Infrastructure`.
 
-## Expected exported functions
-The native DLL should expose coarse-grained commands such as:
-- create and destroy engine
-- initialize engine
-- prepare recording output path
-- start session
-- pause session
-- resume session
-- stop session
-- enumerate audio inputs
-- set callback
+## Export surface
+- Create/destroy engine.
+- Set status callback.
+- Initialize engine.
+- Prepare recording output path.
+- Start, pause, resume, and stop recording.
+- Legacy screenshot exports remain only for ABI compatibility and return failure.
 
-## Current behavior
-The current ABI remains on version `2`. The lifecycle exports and callback signature stay intact, so this step does not require a breaking ABI change.
+## Current native behavior
+- Records display, window, and region sources.
+- Writes live H.264/MP4 output.
+- Keeps `.srrec/manifest.json` for metadata and telemetry.
+- Reports status through callbacks.
+- Reports requested/effective capture backend, fallback reason/HRESULT, encode backend, output size, FPS, drops, queue depth, and latency after stop.
+- Accepts additive encoder preference and video codec fields. The current effective codec remains H.264; HEVC and AV1 are reserved contract values until implemented.
+- Applies an explicit H.264 quality policy for screen/text capture, including calibrated bitrate, constrained VBR, quality/speed, GOP, and CABAC settings when the active Media Foundation encoder accepts them.
+- Uses a hardware-first Media Foundation policy: enumerate hardware H.264/NV12 MFTs and negotiate the D3D11 sink writer before verified hardware attribution, falling back through unverified hardware-requested and compatibility attempts unless hardware-only was requested.
+- Reports quality preset, target/max bitrate, rate control, quality/speed, GOP, CABAC request, and encoder configuration fallback status in the manifest.
+- Uses a fixed SDR desktop color policy for the GPU recording path: BGRA full-range capture, D3D11 VideoProcessor conversion to BT.709 limited-range NV12, and BT.709 H.264/MP4 Media Foundation media types.
+- Reports color primaries, transfer function, YUV matrix, nominal range, and D3D input/output color-space policy additively in schema version `7` manifests.
+- Reports encoder preference, selection reason, fallback reason, vendor/name, adapter LUID, codec, and input pixel format in schema version `7` manifests.
+- Reports GPU pipeline shape additively in the manifest, including queue/resource sizing, D3D multithread protection, failure HRESULT, and conservative hardware encode attribution. When Media Foundation hardware transforms are requested but the active encoder cannot be verified, the manifest reports that explicitly instead of claiming hardware encode.
+- Does not provide real audio capture, preview, HDR, Display P3, BT.2020, or tone mapping.
 
-The native code now:
-- compile cleanly as x64
-- accept calls through the ABI
-- capture real desktop/window/region frames into a live pipeline that prefers GPU surfaces when the source geometry fits the current slice
-- stream those frames directly into a playable `.mp4` file with H.264 video while recording
-- keep a `.srrec` session folder for `manifest.json` and telemetry instead of per-frame BMP artifacts
-- provide callback-driven status updates
-- report real capture backend, encode backend, effective FPS, dropped frames, queue depth, and capture/queue/convert/encode latency through the session manifest so managed contracts can stay honest even when the machine cannot hit the requested FPS
-- report requested capture backend, explicit fallback reason/HRESULT when `WGC` degrades to `DXGI`, explicit `WGC` failure reason/HRESULT with a null fallback target when `Window` capture cannot continue without fallback, and `WGC` first-frame startup latency through the session manifest so managed contracts can explain backend selection honestly
-- keep legacy screenshot exports present only for ABI compatibility; they are unsupported by product code and return a failure result
+## Native source layout
+The DLL exports still compile from `src/engine.cpp`. The implementation is split into `src/engine/*.inl` files that are included by `engine.cpp` inside the native engine anonymous namespace. This is deliberate: it improves reviewability without introducing new exported symbols, changing helper visibility, or changing ABI behavior. New native recording work should land in the closest existing implementation partition, and only become a separately compiled `.cpp` when ownership boundaries and linker-visible contracts are explicit.
 
-For precision source selection, `sr_capture_source.region` continues to mean:
-- physical pixels in Windows virtual-desktop coordinates
-- clipping against the virtual desktop before capture begins
-- support for negative origins when monitors live left/up from the primary display
-- encoder output sizing that may be scaled and even-normalized independently from the requested capture bounds
+## Backend policy
+- Try `Windows.Graphics.Capture` first for capturable windows and single-display captures.
+- Fall back to `DXGI Desktop Duplication` for supported desktop capture.
+- Do not fall back from failed window `WGC` capture to `DXGI`.
+- Use `GDI` as compatibility fallback.
+- Preserve `DXGI` updates-only behavior on static desktop content.
+- Prefer a D3D11/NV12 Media Foundation input path for GPU capture. GDI compatibility capture uses the same bitrate/profile/encoder-config policy as the GPU path. Hardware transforms may be requested, but manifest hardware/software attribution must stay conservative unless the engine can verify it.
 
-Within ABI `2`, the same POD field now also carries normalized physical bounds hints for display/window sources when `Infrastructure` has those bounds available. This keeps the struct stable while allowing the native engine to preserve selected monitor/window geometry more accurately than a kind-only payload.
+## Region field
+`sr_capture_source.region` uses physical virtual-desktop coordinates. It supports negative origins, clipping before capture, and output scaling/even-normalization independent of selected bounds. Within ABI `3`, it may also carry normalized bounds hints for display/window sources.
 
-The export set and coarse lifecycle calls did not need a breaking change for this step; the live MP4/H.264 encoder still sits behind the same managed/native boundary. The engine resolves backend choice internally:
-- `Windows.Graphics.Capture` first when the source resolves to a capturable window or a single display-backed region
-- `DXGI Desktop Duplication` next for single-output desktop capture, with explicit fallback reporting instead of silent backend swaps
-- `GDI` only as the compatibility fallback, including the current spanning-region limitation
-
-For this slice, `DXGI` preserves an `updates-only` cadence policy. The engine does not synthesize duplicate frames to chase the target FPS when the desktop is static, so achieved FPS under `DXGI` can legitimately be lower than the requested frame rate.
-
-It still does not provide audio capture or preview. Screenshot capture is explicitly out of product scope.
-
-## ABI design rules
+## Rules
 - Keep structs POD-friendly and versionable.
-- Prefer explicit fields over hidden allocation contracts.
-- Keep ownership rules obvious.
-- Avoid leaking Windows Runtime or COM-specific shapes across the ABI.
-- Add new functionality by extension, not by breaking existing signatures.
+- Prefer additive changes over breaking signatures.
+- Keep ownership and allocation rules explicit.
+- Do not leak WinRT, COM, or C++ types across the ABI.

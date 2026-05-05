@@ -67,6 +67,7 @@ public sealed class HudViewModel : ObservableObject
         ResolutionOptions = Enum.GetValues<ResolutionOption>();
         QualityOptions = Enum.GetValues<QualityPreset>();
         CountdownOptions = Enum.GetValues<CountdownOption>();
+        EncoderPreferenceOptions = Enum.GetValues<EncoderPreference>();
 
         InitializeCommand = new AsyncRelayCommand(InitializeAsync, () => !_isInitialized);
         PrimaryActionCommand = new AsyncRelayCommand(ExecutePrimaryActionAsync);
@@ -100,6 +101,8 @@ public sealed class HudViewModel : ObservableObject
     public IReadOnlyList<QualityPreset> QualityOptions { get; }
 
     public IReadOnlyList<CountdownOption> CountdownOptions { get; }
+
+    public IReadOnlyList<EncoderPreference> EncoderPreferenceOptions { get; }
 
     public AsyncRelayCommand InitializeCommand { get; }
 
@@ -304,6 +307,23 @@ public sealed class HudViewModel : ObservableObject
             }
 
             _settings.Countdown = value;
+            OnPropertyChanged();
+            PersistSettings();
+            RaiseWorkbenchDetailsChanged();
+        }
+    }
+
+    public EncoderPreference SelectedEncoderPreference
+    {
+        get => _settings.EncoderPreference;
+        set
+        {
+            if (_settings.EncoderPreference == value)
+            {
+                return;
+            }
+
+            _settings.EncoderPreference = value;
             OnPropertyChanged();
             PersistSettings();
             RaiseWorkbenchDetailsChanged();
@@ -587,10 +607,13 @@ public sealed class HudViewModel : ObservableObject
             }
 
             var adapterLabel = string.IsNullOrWhiteSpace(telemetry.AdapterName) ? string.Empty : $" on {telemetry.AdapterName}";
+            var vendorLabel = string.IsNullOrWhiteSpace(telemetry.EncoderVendor) || telemetry.EncoderVendor == "unknown"
+                ? string.Empty
+                : $" {telemetry.EncoderVendor}";
             var encodeMode = telemetry.IsHardwareEncode ? "hardware" : "software/unknown";
             var fallbackLabel = BuildCaptureFallbackLabel(telemetry);
             return
-                $"Output {telemetry.OutputWidth}x{telemetry.OutputHeight} at {telemetry.AverageFramesPerSecond:F1} FPS avg via {telemetry.CaptureBackend} + {telemetry.EncodeBackend} ({encodeMode}){adapterLabel}{fallbackLabel}.";
+                $"Output {telemetry.OutputWidth}x{telemetry.OutputHeight} at {telemetry.AverageFramesPerSecond:F1} FPS avg via {telemetry.CaptureBackend} + {telemetry.VideoCodec}/{telemetry.EncoderPixelFormat}{vendorLabel} ({encodeMode}){adapterLabel}{fallbackLabel}.";
         }
     }
 
@@ -1035,6 +1058,7 @@ public sealed class HudViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedResolution));
         OnPropertyChanged(nameof(SelectedQuality));
         OnPropertyChanged(nameof(SelectedCountdown));
+        OnPropertyChanged(nameof(SelectedEncoderPreference));
         OnPropertyChanged(nameof(IsSystemAudioEnabled));
         OnPropertyChanged(nameof(IsMicrophoneEnabled));
         OnPropertyChanged(nameof(SelectedMicrophoneDeviceId));
@@ -1269,6 +1293,8 @@ public sealed class HudViewModel : ObservableObject
             MicrophoneDeviceId = settings.MicrophoneDeviceId,
             MicrophoneEnabled = settings.MicrophoneEnabled,
             QualityPreset = settings.QualityPreset,
+            EncoderPreference = settings.EncoderPreference,
+            VideoCodec = settings.VideoCodec,
             RememberLastSource = settings.RememberLastSource,
             Resolution = settings.Resolution,
             SaveDirectory = settings.SaveDirectory,

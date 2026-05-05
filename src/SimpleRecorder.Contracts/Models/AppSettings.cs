@@ -22,6 +22,10 @@ public sealed class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
         "SimpleRecorder");
 
+    public EncoderPreference EncoderPreference { get; set; } = EncoderPreference.Auto;
+
+    public VideoCodec VideoCodec { get; set; } = VideoCodec.H264;
+
     public bool RememberLastSource { get; set; } = true;
 
     public CaptureSourceKind LastSourceKind { get; set; } = CaptureSourceKind.Display;
@@ -38,5 +42,7 @@ public sealed class AppSettings
             MicrophoneEnabled,
             MicrophoneDeviceId,
             SaveDirectory,
+            EncoderPreference,
+            VideoCodec,
             QualityProfileMapper.Map(FrameRate, Resolution, QualityPreset));
 }

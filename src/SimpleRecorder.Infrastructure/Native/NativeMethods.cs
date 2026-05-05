@@ -5,8 +5,8 @@ namespace SimpleRecorder.Infrastructure.Native;
 internal static partial class NativeMethods
 {
     internal const string LibraryName = "SimpleRecorder.Engine.Native";
-    internal const int CurrentAbiVersion = 2;
-    internal const int CurrentStructVersion = 1;
+    internal const int CurrentAbiVersion = 3;
+    internal const int CurrentStructVersion = 2;
 
     internal enum SrResultCode
     {
@@ -74,6 +74,8 @@ internal static partial class NativeMethods
         internal readonly int CountdownSeconds;
         internal readonly int IncludeSystemAudio;
         internal readonly int IncludeMicrophone;
+        internal readonly int EncoderPreference;
+        internal readonly int VideoCodec;
 
         internal SrRecordingOptions(
             int version,
@@ -82,7 +84,9 @@ internal static partial class NativeMethods
             int qualityPreset,
             int countdownSeconds,
             int includeSystemAudio,
-            int includeMicrophone)
+            int includeMicrophone,
+            int encoderPreference,
+            int videoCodec)
         {
             Version = version;
             FrameRate = frameRate;
@@ -91,6 +95,8 @@ internal static partial class NativeMethods
             CountdownSeconds = countdownSeconds;
             IncludeSystemAudio = includeSystemAudio;
             IncludeMicrophone = includeMicrophone;
+            EncoderPreference = encoderPreference;
+            VideoCodec = videoCodec;
         }
     }
 

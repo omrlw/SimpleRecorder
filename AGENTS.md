@@ -9,10 +9,9 @@ Treat the repository as an in-progress recording/export vertical slice. The five
 ## Source of truth
 Use these files deliberately:
 - `docs/current-scope.md` for what is in and out of scope in the active slice.
-- `docs/architecture.md` for module boundaries and the target tree.
+- `docs/ARCHITECTURE.md` for module boundaries and the target tree.
 - `docs/native-abi.md` when touching interop or the native engine.
 - `docs/ui-hud-state.md` when changing HUD states, reducer logic, or motion.
-- `docs/execution-plan-template.md` when a task is multi-step or risky.
 
 ## Required architecture
 Keep the solution split into these modules:
@@ -37,7 +36,8 @@ Never duplicate canonical models that already belong in `Contracts`.
 
 ## Current slice guardrails
 - Preserve the packaged WinUI 3 shell, HUD, tray, persisted settings, contracts, and the existing native recording/export slice.
-- Keep incomplete areas such as audio capture, native screenshot, preview, and production source picking behind stable interfaces until the roadmap explicitly expands them.
+- Keep incomplete areas such as audio capture, preview, and production source picking behind stable interfaces until the roadmap explicitly expands them.
+- Treat screenshot capture as out of product scope, not as a dormant feature.
 - Prefer compile-safe, incremental changes over speculative rewrites.
 - Do not bypass the C ABI or collapse module boundaries to move faster.
 
@@ -49,9 +49,6 @@ Typical checks:
 - run the app if the requested change affects startup, HUD behavior, tray behavior, or settings persistence
 
 If the local environment is missing required Windows/Visual Studio tooling, report the missing prerequisite clearly instead of claiming success.
-
-## How to work on larger tasks
-For multi-step changes, create or update a temporary `PLANS.md` in the repo root using `docs/execution-plan-template.md`. Keep `AGENTS.md` stable; put task-specific reasoning in the plan file, not here.
 
 ## Change discipline
 Prefer small, reviewable edits.

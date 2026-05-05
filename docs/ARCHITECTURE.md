@@ -1,81 +1,44 @@
 # Architecture
 
-## Target solution shape
-The repository should converge on this structure:
+SimpleRecorder is a five-module WinUI 3 desktop app with a native recorder behind a stable C ABI.
 
-```text
-SimpleRecorder.sln
-Directory.Build.props
-Directory.Packages.props
-README.md
-build/
-  setup-dev-env.ps1
-  restore.ps1
-Audio/
-  SimpleRecorderClose.wav
-  SimpleRecorderStart.wav
-src/
-  SimpleRecorder.App/
-  SimpleRecorder.Presentation/
-  SimpleRecorder.Contracts/
-  SimpleRecorder.Infrastructure/
-  SimpleRecorder.Engine.Native/
-```
+## Modules
+- `SimpleRecorder.App`: packaged WinUI entry point, window lifetime, dependency composition.
+- `SimpleRecorder.Presentation`: HUD, settings UI, viewmodels, reducer/state, theme, motion.
+- `SimpleRecorder.Contracts`: canonical enums, DTOs, models, and service interfaces.
+- `SimpleRecorder.Infrastructure`: settings persistence, tray, source discovery, region overlay, native adapter.
+- `SimpleRecorder.Engine.Native`: x64 DLL, ABI exports, capture backends, frame processing, encoding, telemetry.
 
-## Module responsibilities
-### SimpleRecorder.App
-- Packaged WinUI 3 entry point.
-- App lifetime, window creation, composition root, bootstrap.
-- No business logic or low-level interop details.
-
-### SimpleRecorder.Presentation
-- HUD views and settings UI.
-- ViewModels, commands, reducer/state.
-- Theme resources, styles, motion tokens.
-- No direct Win32, WGC, D3D11, MF, or WASAPI calls.
-
-### SimpleRecorder.Contracts
-- Canonical enums, DTOs, and interfaces.
-- The public model layer shared across app, presentation, and infrastructure.
-- No WinUI references and no Win32/native details.
-
-### SimpleRecorder.Infrastructure
-- JSON settings persistence in LocalState.
-- Tray integration via Win32 shell APIs.
-- Device discovery and C# adapter to the native DLL.
-- Display/window discovery plus precision region selection plumbing that resolves physical virtual-desktop coordinates into canonical contracts.
-- Mapping from canonical contracts to native POD structs.
-- No screenshot feature surface; recording is the only product capture mode.
-
-### SimpleRecorder.Engine.Native
-- Native x64 DLL.
-- Stable exported C ABI.
-- Internal place for WGC, D3D11, Media Foundation, and WASAPI as the roadmap advances.
-- The current slice owns real frame capture plus a live MP4/H.264 pipeline with bounded capture/encode queues and session telemetry; audio and preview remain future work behind the same ABI.
-- Internally, the recording core should stay split along these seams even when implemented in the same native project:
-  - `CaptureBackend`: source-facing WGC primary path, DXGI fallback, GDI compatibility fallback.
-  - `FrameGraph`: D3D11 crop/scale/color-convert work over fixed resources and bounded queues.
-  - `EncoderBackend`: H.264 writer-facing path that prefers D3D11/NV12-friendly Media Foundation input.
-  - `Writer`: live `.mp4` output plus `.srrec` manifest/telemetry persistence.
-  - `Telemetry + CapabilityProbe`: backend, output, drop, queue, and latency reporting that remains honest when falling back.
-
-## Canonical project rules
+## Boundaries
 - `Contracts` is the only shared model source of truth.
-- Mapping to `sr_*` native structs belongs in `Infrastructure.NativeStructMapper`.
-- Only `Infrastructure` talks to the native DLL from managed code.
-- `App` wires services together; it should not absorb infrastructure logic.
+- `App` composes services; it does not own business logic or interop.
+- `Presentation` consumes contracts and services only.
+- `Infrastructure` maps contracts to native POD structs and is the only managed layer that calls the DLL.
+- `Engine.Native` may use Win32, WGC, DXGI, D3D11, Media Foundation, and future WASAPI internally.
 
-## Future-facing defaults already decided
-- Target app type: packaged WinUI 3 desktop app.
-- Platform focus: x64 first.
-- Save path default: `Videos\SimpleRecorder`.
-- Preview remains off by default in early phases.
-- Region capture remains a UX crop/select layer over the same WGC-based pipeline.
-- Screenshot capture is not a product mode.
+## Native pipeline shape
+- `CaptureBackend`: `WGC` primary path, `DXGI` desktop fallback, `GDI` compatibility fallback.
+- `FrameGraph`: crop/scale/color conversion over bounded resources.
+- `EncoderBackend`: H.264/MP4 output through Media Foundation with hardware-first MFT selection over the active D3D11 adapter.
+- `Writer`: live `.mp4` plus `.srrec/manifest.json`.
+- `Telemetry`: backend, fallback, output, drops, queue depth, and latency reporting.
 
-## Precision selection rules
-- `ScreenRegion` represents physical pixels in the Windows virtual desktop coordinate space.
-- Negative `X`/`Y` values are valid for monitors that sit left/up from the primary display.
-- `Presentation` consumes canonical `CaptureSourceDescriptor` and `ScreenRegion` values only; monitor/window discovery and coordinate normalization stay below it.
-- Encoder-facing output dimensions may be scaled and even-normalized without changing the selected capture bounds; the UI should report both the selected bounds and the effective output size honestly.
-- The native `sr_capture_source.region` field remains physical virtual-desktop coordinates; under the current slice it may also carry normalized bounds hints for display/window sources so the engine can preserve source selection fidelity without extending the ABI.
+## Native implementation layout
+The native engine keeps a single compiled translation unit, `src/engine.cpp`, so the exported C ABI, anonymous-namespace helpers, and initialization behavior remain stable. The implementation is partitioned into internal include files under `src/engine/` by responsibility:
+- `media_geometry.inl`: Media Foundation startup, monitor enumeration, source geometry, and D3D context setup.
+- `frame_graph.inl`: D3D11 crop, scale, and BGRA-to-NV12 processing.
+- `encoder_mf.inl`: Media Foundation H.264 writer and GPU sample submission.
+- `capture_backends.inl`: WGC and DXGI capture backends.
+- `legacy_gdi_pipeline.inl`: GDI compatibility capture and RGB32 writer.
+- `capture_loops.inl`: capture pacing, backpressure, fallback handling, and queueing.
+- `encode_loops.inl`: encode workers and sample timing.
+- `session_lifecycle.inl`: stop/failure coordination and telemetry helper calculations.
+- `manifest_writer.inl`: `.srrec/manifest.json` writer.
+- `engine_initialization.inl`: recording-session backend initialization.
+
+## Coordinate rules
+- `ScreenRegion` uses physical pixels in the Windows virtual desktop.
+- Negative `X`/`Y` values are valid.
+- Display/window discovery and coordinate normalization stay below `Presentation`.
+- Encoder output may be scaled and even-normalized without changing selected bounds.
+- `sr_capture_source.region` remains physical bounds and may carry normalized hints for display/window sources under ABI `3`.

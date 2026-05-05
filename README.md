@@ -1,76 +1,57 @@
 # SimpleRecorder
 
-Current recording/export vertical slice for a packaged WinUI 3 desktop recorder on Windows.
+SimpleRecorder is a packaged WinUI 3 desktop recorder for Windows. The app centers on a compact floating HUD, tray integration, persisted settings, source selection, and a native recording engine behind a versioned C ABI.
 
-For the current HUD and settings visual work, `SimpleRecorder.pen` is the active source of truth.
-Google Sans is the target typeface; when it is not installed locally, the app falls back to `Segoe UI Variable Display` and then `Segoe UI`.
+## Current Architecture
+- `SimpleRecorder.App`: WinUI entry point, window lifetime, and dependency composition.
+- `SimpleRecorder.Presentation`: HUD, settings UI, viewmodels, reducer/state, theme, and motion.
+- `SimpleRecorder.Contracts`: canonical enums, DTOs, models, and service interfaces.
+- `SimpleRecorder.Infrastructure`: settings persistence, tray, source discovery, region overlay, and managed native adapter.
+- `SimpleRecorder.Engine.Native`: x64 DLL, ABI exports, WGC/DXGI/GDI capture, D3D11 frame processing, Media Foundation encoding, and telemetry.
 
-What is already in this repo:
+The boundaries are deliberate: `Presentation` never references Win32, D3D11, Media Foundation, WASAPI, or `sr_*` ABI structs. `Infrastructure` is the only managed layer that maps contracts to native POD structs.
 
-- `SimpleRecorder.sln` with the five required modules
-- x64-first root build settings
-- a compact HUD shell in `SimpleRecorder.Presentation`
-- tray and settings persistence in `SimpleRecorder.Infrastructure`
-- a versioned native DLL ABI with a real recording slice behind `Infrastructure`
+## Recording Pipeline
+- Capture prefers `Windows.Graphics.Capture` for capturable windows and single-display captures.
+- `DXGI Desktop Duplication` is the explicit fallback for supported desktop capture.
+- `GDI` is reserved for compatibility, including unsupported spanning-region cases.
+- GPU capture uses D3D11 crop/scale/color conversion from BGRA full-range desktop frames to BT.709 limited-range NV12.
+- Encoding writes live H.264/MP4 through Media Foundation.
+- Hardware encode is hardware-first, not blindly assumed: the engine probes H.264/NV12 hardware MFTs, negotiates the D3D11 Sink Writer path, and reports verified hardware only when it can justify it.
 
-What is real in the current slice:
+## Outputs And Telemetry
+Recordings are written as `.mp4` files next to `.srrec` session folders. Each session folder contains `manifest.json` schema version 7 with:
+- requested/effective capture backend and fallback details,
+- encoder preference, codec, pixel format, vendor/name, adapter name/LUID, and selection/fallback reason,
+- quality policy, bitrate, GOP, CABAC, color policy,
+- FPS, drops, queue depth, capture/convert/encode latency, and output size.
 
-- display, region, and best-effort window capture through the native DLL
-- live H.264/MP4 recording through `capture -> bounded queue -> encode -> live mp4 output`
-- `.srrec` session folders kept for `manifest.json` metadata and telemetry, not per-frame BMP storage
-- pause/resume/stop state changes driven by the same contract-facing interfaces used by the HUD and tray
+## Current Scope
+In scope: packaged WinUI shell, HUD, tray, persisted settings, display/window/region recording, GPU-first native capture, H.264/MP4 export, hardware-first Media Foundation encode policy, and post-stop telemetry.
 
-What is intentionally not implemented yet:
+Not implemented yet: real microphone capture, real loopback/system audio capture, preview rendering, direct NVENC/AMF/oneVPL backends, HDR/tone mapping, signing, and release automation.
 
-- real microphone or loopback audio capture
-- screenshot capture; SimpleRecorder is a recorder-only product
-- preview rendering
-- advanced source-picker polish beyond the current deterministic display/window picker and precision region overlay
+Out of scope: screenshot capture. SimpleRecorder is recording-only.
 
-## Structure
-
-- `src/SimpleRecorder.App`: app bootstrap, window lifetime, dependency composition
-- `src/SimpleRecorder.Presentation`: HUD views, state, viewmodels, theme
-- `src/SimpleRecorder.Contracts`: shared enums, models, interfaces
-- `src/SimpleRecorder.Infrastructure`: settings store, tray integration, native adapter
-- `src/SimpleRecorder.Engine.Native`: x64 DLL with the versioned C ABI and the minimum real capture slice
-- `build/`: setup and restore helpers
-- `docs/`: scope and architecture references
-
-## Prerequisites
-
-- Windows 10/11
-- .NET 8 SDK
-- Visual Studio with WinUI / Windows App SDK tooling
-- Desktop development with C++
-- Windows 10/11 SDK
-
-Run the environment check first:
+## Build
+Prerequisites: Windows 10/11, .NET 8 SDK, Visual Studio with Windows App SDK tooling, Desktop development with C++, and Windows SDK.
 
 ```powershell
 .\build\setup-dev-env.ps1
-```
-
-Restore the managed projects from the repo root:
-
-```powershell
 .\build\restore.ps1
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Release /p:Platform=x64
 ```
 
-Build the full solution with Visual Studio MSBuild. Do not use `dotnet build` for the full solution, because the repo includes a native `.vcxproj`.
+Use Visual Studio MSBuild for the full solution. `dotnet build` can build managed projects, but it does not reliably build the native `.vcxproj`.
 
-If MSBuild and the VC++ workload are available, build the full solution in `Debug|x64`:
+## Run
+Open `SimpleRecorder.sln`, set `SimpleRecorder.App` as the startup project, select `Debug | x64`, and run.
+
+For one-step local launch:
 
 ```powershell
-& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" .\SimpleRecorder.sln /restore /p:Configuration=Debug /p:Platform=x64
+.\build\run-dev.ps1
 ```
 
-## Slice Notes
-
-- `Presentation` does not talk directly to Win32, Media Foundation, D3D11, or the native ABI.
-- The native engine captures frames into a bounded native queue and encodes into the MP4/H.264 output during recording.
-- The `.srrec` folder remains on disk for manifest metadata and telemetry; the contract-facing output path is the live `.mp4`.
-- Screenshot is intentionally not exposed by the app, HUD, tray, managed contracts, or managed native adapter.
-- Precision region selection is expressed in physical virtual-desktop pixels so DPI scaling, mixed-monitor layouts, and negative coordinates stay explicit at the contract boundary.
-- Audio and preview remain intentionally stubbed.
-- Settings are persisted to `%LocalAppData%\Packages\SimpleRecorder.App\LocalState\settings.json`, with migration from the older `%LocalAppData%\SimpleRecorder\settings.json` path when present.
+If unpackaged launch fails with `REGDB_E_CLASSNOTREG` during Windows App Runtime initialization, install/register the matching Windows App Runtime or run from a properly configured Visual Studio packaged app environment.

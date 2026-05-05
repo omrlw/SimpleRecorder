@@ -11,6 +11,8 @@ public sealed record RecordingOptions(
     bool IsMicrophoneEnabled,
     string? MicrophoneDeviceId,
     string SaveDirectory,
+    EncoderPreference EncoderPreference,
+    VideoCodec VideoCodec,
     RecordingProfile VideoProfile)
 {
     public bool ShouldShowCountdown => Countdown != CountdownOption.Off;

@@ -95,6 +95,31 @@
                 <ColumnDefinition Width="100" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE950;" Style="{StaticResource HudSettingsGlyphStyle}" />
+                <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Encoder" />
+            </StackPanel>
+            <Button
+                Grid.Column="1"
+                IsEnabled="{Binding IsSettingsEnabled}"
+                Style="{StaticResource HudSettingsValueButtonStyle}">
+                <Button.Flyout>
+                    <MenuFlyout
+                        x:Name="EncoderPreferenceFlyout"
+                        MenuFlyoutPresenterStyle="{StaticResource HudMenuFlyoutPresenterStyle}"
+                        Opening="OnEncoderPreferenceFlyoutOpening" />
+                </Button.Flyout>
+                <TextBlock
+                    Style="{StaticResource HudSettingsValueTextStyle}"
+                    Text="{Binding SelectedEncoderPreference, Converter={StaticResource OptionDisplayConverter}}" />
+            </Button>
+        </Grid>
+
+        <Grid ColumnSpacing="{StaticResource HudFieldGap}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="100" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <FontIcon Glyph="&#xE823;" Style="{StaticResource HudSettingsGlyphStyle}" />
                 <TextBlock Style="{StaticResource HudSettingsLabelTextStyle}" Text="Countdown" />
             </StackPanel>
