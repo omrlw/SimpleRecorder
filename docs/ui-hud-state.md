@@ -1,16 +1,11 @@
 # HUD state and motion
 
-## Visual source of truth
-Use `SimpleRecorder.pen` as the active visual source of truth for the current HUD and settings surface.
-Legacy `.fig` exports are archival references only and should not drive new UI decisions.
-
-For the current validation slice, prefer a simple workbench-style operator panel over a compact/polished HUD when usability and observability conflict.
+`SimpleRecorder.pen` is the active visual source for HUD and settings work. Legacy `.fig` files are archival only.
 
 ## State model
-Keep session state separate from transient feedback.
+Keep durable session state separate from transient feedback.
 
-### Session state
-Use a durable session layer such as:
+Session states:
 - `Idle`
 - `SourceSelected`
 - `Countdown`
@@ -18,33 +13,26 @@ Use a durable session layer such as:
 - `Paused`
 - `StoppingSaving`
 
-### Feedback state
-Use a separate transient feedback layer such as:
+Feedback states:
 - `None`
 - `NonBlockingError`
 
-Do not overload one enum to represent both concepts.
-
 ## Reducer rules
-- A selected or restored valid source moves the HUD from `Idle` to `SourceSelected`.
-- `Record` moves to `Countdown` only when countdown is enabled.
-- `Record` moves directly to `Recording` when countdown is off.
-- `Pause` and `Resume` only affect the session layer.
-- `Stop` moves through `StoppingSaving`, then returns to `SourceSelected`.
-- Non-fatal errors appear as overlays or banners without replacing the session state.
-- The secondary HUD action is pause/resume only; it is hidden outside recording and paused states.
-- Core source selection, start/stop/pause actions, and recording options may be shown inline when that improves operator usability.
+- Selecting or restoring a valid source moves to `SourceSelected`.
+- Record moves to `Countdown` only when countdown is enabled.
+- Record moves directly to `Recording` when countdown is off.
+- Pause/resume only affect session state.
+- Stop moves through `StoppingSaving`, then returns to `SourceSelected`.
+- Non-fatal errors appear as feedback without replacing session state.
+- Secondary action is pause/resume and is hidden outside recording/paused states.
 
-## Motion rules
-Favor compositor-first motion and avoid layout-heavy animations.
-During recording, keep animation minimal and functional.
-Respect reduced-motion settings.
+## HUD behavior
+- Prefer a compact operator panel over decorative presentation.
+- Show source, recording options, and telemetry when they improve observability.
+- During recording, keep motion minimal and functional.
+- Respect reduced-motion settings.
 
 ## Motion tokens
-Use these as the default timing budget unless a task explicitly changes the design language:
-- HUD enter/exit: 180 ms
-- Settings reveal: 160 ms
-- Recording ↔ paused transitions: 120 ms
-
-## Design guardrail
-The HUD should feel compact, clear, and stable under recording load. Avoid decorative animation loops or effects that add churn without conveying state.
+- HUD enter/exit: 180 ms.
+- Settings reveal: 160 ms.
+- Recording/paused transition: 120 ms.

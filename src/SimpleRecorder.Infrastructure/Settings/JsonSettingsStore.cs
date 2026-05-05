@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SimpleRecorder.Contracts.Enums;
 using SimpleRecorder.Contracts.Models;
 using SimpleRecorder.Contracts.Services;
 using Windows.Storage;
@@ -115,7 +116,11 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     private static AppSettings NormalizeForCurrentSlice(AppSettings settings, out bool wasNormalized)
     {
-        var needsNormalization = settings.SystemAudioEnabled || settings.MicrophoneEnabled || settings.MicrophoneDeviceId is not null;
+        var needsNormalization =
+            settings.SystemAudioEnabled ||
+            settings.MicrophoneEnabled ||
+            settings.MicrophoneDeviceId is not null ||
+            settings.VideoCodec != VideoCodec.H264;
         wasNormalized = needsNormalization;
         if (!needsNormalization)
         {
@@ -125,6 +130,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         settings.SystemAudioEnabled = false;
         settings.MicrophoneEnabled = false;
         settings.MicrophoneDeviceId = null;
+        settings.VideoCodec = VideoCodec.H264;
         return settings;
     }
 }

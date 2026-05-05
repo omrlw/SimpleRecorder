@@ -66,7 +66,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>D3D11.lib;Dxgi.lib;Mfplat.lib;Mfreadwrite.lib;Mfuuid.lib;Ole32.lib;RuntimeObject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>D3D11.lib;Dxgi.lib;Mfplat.lib;Mfreadwrite.lib;Mfuuid.lib;Ole32.lib;Propsys.lib;RuntimeObject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
@@ -88,7 +88,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>D3D11.lib;Dxgi.lib;Mfplat.lib;Mfreadwrite.lib;Mfuuid.lib;Ole32.lib;RuntimeObject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>D3D11.lib;Dxgi.lib;Mfplat.lib;Mfreadwrite.lib;Mfuuid.lib;Ole32.lib;Propsys.lib;RuntimeObject.lib;windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
@@ -99,12 +99,25 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="src\engine\capture_backends.inl" />
+    <None Include="src\engine\capture_loops.inl" />
+    <None Include="src\engine\encode_loops.inl" />
+    <None Include="src\engine\encoder_mf.inl" />
+    <None Include="src\engine\engine_initialization.inl" />
+    <None Include="src\engine\frame_graph.inl" />
+    <None Include="src\engine\legacy_gdi_pipeline.inl" />
+    <None Include="src\engine\manifest_writer.inl" />
+    <None Include="src\engine\media_geometry.inl" />
+    <None Include="src\engine\session_lifecycle.inl" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\engine.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="src\sr_exports.cpp" />
-    <ClCompile Include="src\stub_engine.cpp" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

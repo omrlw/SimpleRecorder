@@ -309,10 +309,10 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             return $"Video exported to {Path.GetFileName(outputPath)}.";
         }
 
-        var encodeMode = telemetry.IsHardwareEncode ? "hardware" : "software/unknown";
+        var encodeMode = DescribeEncodeMode(telemetry);
         var fallbackDetail = BuildFallbackDetail(telemetry);
         return
-            $"Video exported to {Path.GetFileName(outputPath)} via {telemetry.CaptureBackend} + {telemetry.EncodeBackend} ({encodeMode}) at {telemetry.AverageFramesPerSecond:F1} FPS avg, {telemetry.OutputWidth}x{telemetry.OutputHeight}, {telemetry.DroppedFrames} dropped{fallbackDetail}.";
+            $"Video exported to {Path.GetFileName(outputPath)} via {telemetry.CaptureBackend} + {telemetry.VideoCodec}/{telemetry.EncoderPixelFormat} ({encodeMode}) at {telemetry.AverageFramesPerSecond:F1} FPS avg, {telemetry.OutputWidth}x{telemetry.OutputHeight}, {telemetry.DroppedFrames} dropped{fallbackDetail}.";
     }
 
     private static string BuildStopFailedMessage(
@@ -338,9 +338,23 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
 
         var fallbackDetail = BuildFallbackDetail(telemetry);
         var captureFailureDetail = BuildCaptureBackendFailureDetail(telemetry);
+        var failureHresult = string.IsNullOrWhiteSpace(telemetry.FailureHresult)
+            ? string.Empty
+            : $"; failure HRESULT {telemetry.FailureHresult}";
         return
-            $"Recording stop failed with {failureReason}. {outputName} may be incomplete; telemetry: {telemetry.CaptureBackend} + {telemetry.EncodeBackend}, {telemetry.AverageFramesPerSecond:F1} FPS avg, {telemetry.OutputWidth}x{telemetry.OutputHeight}, {telemetry.DroppedFrames} dropped{fallbackDetail}{captureFailureDetail}.";
+            $"Recording stop failed with {failureReason}. {outputName} may be incomplete; telemetry: {telemetry.CaptureBackend} + {telemetry.EncodeBackend}, {telemetry.AverageFramesPerSecond:F1} FPS avg, {telemetry.OutputWidth}x{telemetry.OutputHeight}, {telemetry.DroppedFrames} dropped{fallbackDetail}{captureFailureDetail}{failureHresult}.";
     }
+
+    private static string DescribeEncodeMode(RecordingSessionTelemetry telemetry) =>
+        telemetry.HardwareEncodeStatus switch
+        {
+            "verified-hardware" => "hardware",
+            "verified-software" => "software",
+            "unverified-hardware-requested" => "hardware requested, unverified",
+            "hardware-transform-requested-unverified" => "hardware transform requested, unverified",
+            "hardware-required-unavailable" => "hardware required, unavailable",
+            _ => telemetry.IsHardwareEncode ? "hardware" : "software/unknown"
+        };
 
     private static string BuildFallbackDetail(RecordingSessionTelemetry telemetry)
     {

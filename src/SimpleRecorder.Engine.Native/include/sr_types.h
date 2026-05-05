@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-static const uint32_t sr_abi_version = 2;
-static const uint32_t sr_struct_version = 1;
+static const uint32_t sr_abi_version = 3;
+static const uint32_t sr_struct_version = 2;
 
 enum sr_result_code
 {
@@ -32,6 +32,20 @@ enum sr_capture_source_kind
     sr_capture_source_region = 2
 };
 
+enum sr_encoder_preference
+{
+    sr_encoder_preference_auto = 0,
+    sr_encoder_preference_hardware_only = 1,
+    sr_encoder_preference_software_fallback = 2
+};
+
+enum sr_video_codec
+{
+    sr_video_codec_h264 = 0,
+    sr_video_codec_hevc = 1,
+    sr_video_codec_av1 = 2
+};
+
 struct sr_rect
 {
     int32_t x;
@@ -57,6 +71,8 @@ struct sr_recording_options
     int32_t countdown_seconds;
     int32_t include_system_audio;
     int32_t include_microphone;
+    int32_t encoder_preference;
+    int32_t video_codec;
 };
 
 struct sr_status_event

@@ -11,13 +11,13 @@ public static class QualityProfileMapper
     {
         var baseBitrate = (preset, resolution) switch
         {
-            (QualityPreset.SmallFile, ResolutionOption.P720) => 4_000,
-            (QualityPreset.SmallFile, _) => 8_000,
-            (QualityPreset.Balanced, ResolutionOption.P720) => 6_000,
-            (QualityPreset.Balanced, _) => 10_000,
-            (QualityPreset.Sharp, ResolutionOption.P720) => 8_000,
-            (QualityPreset.Sharp, _) => 14_000,
-            _ => 10_000
+            (QualityPreset.SmallFile, ResolutionOption.P720) => 5_000,
+            (QualityPreset.SmallFile, _) => 9_000,
+            (QualityPreset.Balanced, ResolutionOption.P720) => 9_000,
+            (QualityPreset.Balanced, _) => 16_000,
+            (QualityPreset.Sharp, ResolutionOption.P720) => 12_000,
+            (QualityPreset.Sharp, _) => 22_000,
+            _ => 16_000
         };
 
         if (frameRate == FrameRateOption.Fps120)
@@ -34,6 +34,6 @@ public static class QualityProfileMapper
         }
 
         var encoderProfile = preset == QualityPreset.SmallFile ? "Main" : "High";
-        return new RecordingProfile(encoderProfile, baseBitrate, 2, AllowHardwareEncodeFirst: true);
+        return new RecordingProfile(encoderProfile, baseBitrate, 2, AllowHardwareEncodeFirst: true, VideoCodec.H264);
     }
 }
