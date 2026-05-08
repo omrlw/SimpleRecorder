@@ -1270,7 +1270,7 @@ public sealed class HudViewModel : ObservableObject
         {
             var autoOptions = _settings.ToRecordingOptions() with { Resolution = ResolutionOption.Auto };
             var preview = _captureSourcePicker.Describe(_selectedSource, autoOptions);
-            return FormatResolutionHeight(preview.OutputHeight);
+            return $"Native {FormatResolutionHeight(preview.OutputHeight)}";
         }
         catch
         {

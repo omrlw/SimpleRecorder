@@ -401,6 +401,12 @@
             return fail(result, L"output.SetUINT32(MF_MT_MPEG2_PROFILE)");
         }
 
+        result = output_type->SetUINT32(MF_MT_MPEG2_LEVEL, _session.quality_config.h264_level);
+        if (FAILED(result))
+        {
+            return fail(result, L"output.SetUINT32(MF_MT_MPEG2_LEVEL)");
+        }
+
         result = MFSetAttributeSize(
             output_type.Get(),
             MF_MT_FRAME_SIZE,

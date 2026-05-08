@@ -9,10 +9,11 @@
         const auto final_video_name = std::string(final_video_name_utf8.begin(), final_video_name_utf8.end());
         const auto dropped_frame_count = session.metrics.backpressure_drop_count + session.metrics.capture_failure_count;
         const auto wall_duration_qpc = compute_wall_duration_qpc(session);
+        const RECT output_rect{ 0, 0, session.metrics.output_width, session.metrics.output_height };
 
         json << std::fixed << std::setprecision(2);
         json << "{\n";
-        json << "  \"schemaVersion\": 9,\n";
+        json << "  \"schemaVersion\": 10,\n";
         json << "  \"artifactType\": \"streaming-mp4-session\",\n";
         json << "  \"requestedCaptureBackend\": \"" << escape_json(session.requested_capture_backend) << "\",\n";
         json << "  \"captureBackend\": \"" << escape_json(session.capture_backend) << "\",\n";
@@ -64,6 +65,9 @@
         json << "  \"gopSize\": " << session.quality_config.gop_size << ",\n";
         json << "  \"cabacRequested\": " << (session.quality_config.cabac_requested ? "true" : "false") << ",\n";
         json << "  \"encoderLowLatency\": " << (session.quality_config.low_latency_requested ? "true" : "false") << ",\n";
+        json << "  \"encoderRealTime\": " << (session.quality_config.real_time_requested ? "true" : "false") << ",\n";
+        json << "  \"encoderAllowFrameDrops\": " << (session.quality_config.allow_frame_drops ? "true" : "false") << ",\n";
+        json << "  \"encoderFrameRateConversion\": \"" << (session.quality_config.frame_rate_conversion_disabled ? "disabled" : "enabled") << "\",\n";
         json << "  \"encoderConfigStatus\": \"" << escape_json(session.encoder_config_status) << "\",\n";
         json << "  \"colorPrimaries\": \"BT.709\",\n";
         json << "  \"transferFunction\": \"BT.709\",\n";
@@ -102,6 +106,10 @@
         {
             json << "\"" << escape_json(session.copy_integrity_failure_reason) << "\",\n";
         }
+        json << "  \"cropResizeMismatchReason\": \"" << escape_json(session.crop_resize_mismatch_reason) << "\",\n";
+        write_json_rect(json, "captureItemRect", session.capture_item_rect, true);
+        write_json_rect(json, "sourceRect", session.capture_crop_rect, true);
+        write_json_rect(json, "outputRect", output_rect, true);
         json << "  \"wgcStartupAttempted\": " << (session.wgc_startup_attempted ? "true" : "false") << ",\n";
         json << "  \"wgcFirstFrameLatencyMs\": " << qpc_to_millis(session.wgc_first_frame_latency_qpc) << ",\n";
         json << "  \"wgcResizeCount\": " << session.wgc_resize_count << ",\n";
@@ -130,6 +138,11 @@
         json << "  \"wasMonitorFrameRateCapped\": " << (session.options.frame_rate == monitor_frame_rate_option && session.monitor_refresh_rate > session.target_frame_rate ? "true" : "false") << ",\n";
         json << "  \"frameRatePolicy\": \"constant-output-cadence-max-120\",\n";
         json << "  \"fpsCapReason\": \"" << escape_json(session.fps_cap_reason) << "\",\n";
+        json << "  \"captureFrameRate\": " << compute_capture_frame_rate(session.metrics) << ",\n";
+        json << "  \"encodeContainerFrameRate\": " << session.target_frame_rate << ",\n";
+        json << "  \"duplicatedFrameRatio\": " << compute_duplicated_frame_ratio(session.metrics) << ",\n";
+        json << "  \"h264Level\": \"" << escape_json(session.quality_config.h264_level_name) << "\",\n";
+        json << "  \"h264LevelValue\": " << session.quality_config.h264_level << ",\n";
         json << "  \"requestedResolution\": " << session.options.resolution << ",\n";
         json << "  \"outputWidth\": " << session.metrics.output_width << ",\n";
         json << "  \"outputHeight\": " << session.metrics.output_height << ",\n";
@@ -138,8 +151,13 @@
         json << "  \"startedAtUnixMillis\": " << session.started_at_unix_millis << ",\n";
         json << "  \"completedAtUnixMillis\": " << unix_time_millis() << ",\n";
         json << "  \"wallDurationMs\": " << qpc_to_millis(wall_duration_qpc) << ",\n";
-        json << "  \"representedDurationMs\": " << qpc_to_millis(session.metrics.represented_duration_qpc) << ",\n";
+        json << "  \"representedDurationMs\": " << (session.metrics.represented_duration_hns > 0
+            ? hns_to_millis(session.metrics.represented_duration_hns)
+            : qpc_to_millis(session.metrics.represented_duration_qpc)) << ",\n";
         json << "  \"representedToWallDurationRatio\": " << compute_represented_to_wall_duration_ratio(session) << ",\n";
+        json << "  \"firstSampleTimestampHns\": " << std::max<LONGLONG>(session.metrics.first_sample_timestamp_hns, 0) << ",\n";
+        json << "  \"lastSampleTimestampHns\": " << session.metrics.last_sample_timestamp_hns << ",\n";
+        json << "  \"lastSampleDurationHns\": " << session.metrics.last_sample_duration_hns << ",\n";
         json << "  \"finalVideoFile\": \"" << escape_json(final_video_name) << "\",\n";
         json << "  \"finalVideoContainer\": \"mp4\",\n";
         json << "  \"finalVideoCodec\": \"h264\",\n";

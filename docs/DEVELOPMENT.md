@@ -46,3 +46,5 @@ If launch fails with `REGDB_E_CLASSNOTREG` from Windows App Runtime initializati
 - Native engine, ABI, manifest, or adapter changes: build `Debug | x64` and `Release | x64`.
 - Startup, HUD, tray, settings, or recording changes: launch the app if local tooling is available.
 - Recording pipeline changes: record, pause, resume, stop, then inspect the `.mp4` and `.srrec/manifest.json`.
+- FPS/capture changes: verify `captureBackend`, `targetFrameRate`, `effectiveFrameRate`, `captureFrameRate`, `duplicatedFrameRatio`, `backpressureDropCount`, `droppedFrameCount`, `pacingOverrunCount`, `sourceRect`, `outputRect`, and `cropResizeMismatchReason`.
+- Display/region recordings should normally use `dxgi-desktop-duplication`; window recordings should use `windows-graphics-capture`.

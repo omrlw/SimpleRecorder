@@ -34,7 +34,10 @@
         session.capture_crop_rect = geometry->source_rect;
         session.capture_monitor = geometry->monitor;
         session.capture_window = geometry->window;
-        session.requested_capture_backend = "windows-graphics-capture";
+        session.requested_capture_backend =
+            can_fallback_to_dxgi(session.source.kind)
+                ? "dxgi-desktop-duplication"
+                : "windows-graphics-capture";
         session.capture_backend = "pending-gpu-backend";
         session.encode_backend = "pending-gpu-encoder";
         session.encoder_config_status = "pending";
@@ -131,5 +134,13 @@
         }
 
         session.legacy_capture_rect = geometry->requested_bounds;
+        session.capture_item_rect = geometry->requested_bounds;
+        session.capture_crop_rect =
+        {
+            0,
+            0,
+            geometry->requested_bounds.right - geometry->requested_bounds.left,
+            geometry->requested_bounds.bottom - geometry->requested_bounds.top
+        };
         return initialize_legacy_capture_resources(session);
     }

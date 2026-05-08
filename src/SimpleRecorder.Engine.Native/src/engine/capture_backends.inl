@@ -51,6 +51,73 @@
         return MF_E_INVALIDMEDIATYPE;
     }
 
+    ComPtr<ID3D11Texture2D> wgc_capture_backend::acquire_owned_frame_texture(uint32_t width, uint32_t height)
+    {
+        if (width == 0 || height == 0)
+        {
+            throw winrt::hresult_error(E_INVALIDARG, L"WGC frame content size is empty.");
+        }
+
+        {
+            std::scoped_lock lock(_gate);
+            while (!_available_frame_textures.empty())
+            {
+                auto texture = std::move(_available_frame_textures.front());
+                _available_frame_textures.pop_front();
+                if (texture == nullptr)
+                {
+                    continue;
+                }
+
+                D3D11_TEXTURE2D_DESC desc{};
+                texture->GetDesc(&desc);
+                if (desc.Width == width &&
+                    desc.Height == height &&
+                    desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM)
+                {
+                    return texture;
+                }
+            }
+        }
+
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+
+        ComPtr<ID3D11Texture2D> texture;
+        winrt::check_hresult(_d3d.device->CreateTexture2D(&desc, nullptr, &texture));
+        return texture;
+    }
+
+    void wgc_capture_backend::recycle_owned_frame_texture(ComPtr<ID3D11Texture2D> texture) noexcept
+    {
+        if (texture == nullptr)
+        {
+            return;
+        }
+
+        std::scoped_lock lock(_gate);
+        _available_frame_textures.push_back(std::move(texture));
+    }
+
+    void wgc_capture_backend::recycle_ready_frames_locked() noexcept
+    {
+        while (!_ready_frames.empty())
+        {
+            if (_ready_frames.front().texture != nullptr)
+            {
+                _available_frame_textures.push_back(std::move(_ready_frames.front().texture));
+            }
+
+            _ready_frames.pop_front();
+        }
+    }
+
     wgc_capture_backend::wgc_capture_backend(d3d_context& d3d, const resolved_capture_geometry& geometry, const sr_capture_source& source)
         : _d3d(d3d),
           _geometry(geometry),
@@ -164,10 +231,12 @@
         }
 
         auto next = std::move(_ready_frames.back());
-        _ready_frames.clear();
+        _ready_frames.pop_back();
+        recycle_ready_frames_locked();
         lock.unlock();
 
         const auto copy_result = copy_texture_to_destination(_d3d, destination, next.texture.Get(), _copy_mismatch_reason);
+        recycle_owned_frame_texture(std::move(next.texture));
         if (FAILED(copy_result))
         {
             return copy_result;
@@ -204,6 +273,8 @@
             _frame_pool = nullptr;
         }
 
+        recycle_ready_frames_locked();
+        _available_frame_textures.clear();
         _item = nullptr;
         _frame_arrived_condition.notify_all();
     }
@@ -278,11 +349,45 @@
             return;
         }
 
+        const auto previous_bounds = _geometry.capture_item_bounds;
+        const auto previous_source = _geometry.source_rect;
+        const auto previous_width = previous_bounds.right - previous_bounds.left;
+        const auto previous_height = previous_bounds.bottom - previous_bounds.top;
+
         _geometry.capture_item_bounds = { 0, 0, width, height };
         if (_geometry.window != nullptr)
         {
             _geometry.source_rect = { 0, 0, width, height };
             return;
+        }
+
+        const auto source_is_unspecified_display =
+            _source.kind == sr_capture_source_display &&
+            _source.region.width <= 0 &&
+            _source.region.height <= 0;
+        const auto source_covers_previous_item =
+            previous_width > 0 &&
+            previous_height > 0 &&
+            previous_source.left <= 0 &&
+            previous_source.top <= 0 &&
+            previous_source.right >= previous_width &&
+            previous_source.bottom >= previous_height;
+
+        if (source_is_unspecified_display || source_covers_previous_item)
+        {
+            _geometry.source_rect = { 0, 0, width, height };
+            return;
+        }
+
+        if (previous_width > 0 && previous_height > 0)
+        {
+            _geometry.source_rect =
+            {
+                scale_coordinate(previous_source.left, previous_width, width),
+                scale_coordinate(previous_source.top, previous_height, height),
+                scale_coordinate(previous_source.right, previous_width, width),
+                scale_coordinate(previous_source.bottom, previous_height, height)
+            };
         }
 
         RECT frame_bounds{ 0, 0, width, height };
@@ -307,7 +412,8 @@
             if (content_size.Width != expected_width || content_size.Height != expected_height)
             {
                 std::scoped_lock lock(_gate);
-                _ready_frames.clear();
+                recycle_ready_frames_locked();
+                _available_frame_textures.clear();
 
                 auto updated_geometry = resolve_capture_geometry(_source);
                 if (!updated_geometry.has_value() || updated_geometry->spans_multiple_monitors)
@@ -342,15 +448,48 @@
             ComPtr<ID3D11Texture2D> texture;
             winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(texture.GetAddressOf())));
 
+            D3D11_TEXTURE2D_DESC source_desc{};
+            texture->GetDesc(&source_desc);
+            if (source_desc.Width < static_cast<UINT>(content_size.Width) ||
+                source_desc.Height < static_cast<UINT>(content_size.Height) ||
+                source_desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM)
+            {
+                std::scoped_lock lock(_gate);
+                _copy_mismatch_reason = source_desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM
+                    ? "wgc-frame-format-mismatch"
+                    : "wgc-frame-smaller-than-content-size";
+                fail_locked(MF_E_INVALIDMEDIATYPE, capture_fallback_reason::runtime_hresult);
+                return;
+            }
+
+            auto owned_texture = acquire_owned_frame_texture(
+                static_cast<uint32_t>(content_size.Width),
+                static_cast<uint32_t>(content_size.Height));
+            const D3D11_BOX content_box
+            {
+                0,
+                0,
+                0,
+                static_cast<UINT>(content_size.Width),
+                static_cast<UINT>(content_size.Height),
+                1
+            };
+            _d3d.context->CopySubresourceRegion(owned_texture.Get(), 0, 0, 0, 0, texture.Get(), 0, &content_box);
+            _d3d.context->Flush();
+
             std::scoped_lock lock(_gate);
             if (_ready_frames.size() >= wgc_frame_queue_limit)
             {
+                if (_ready_frames.front().texture != nullptr)
+                {
+                    _available_frame_textures.push_back(std::move(_ready_frames.front().texture));
+                }
                 _ready_frames.pop_front();
                 ++_queue_drop_count;
             }
 
             const auto captured_at_qpc = qpc_now();
-            _ready_frames.push_back({ texture, captured_at_qpc });
+            _ready_frames.push_back({ owned_texture, captured_at_qpc });
             if (!_has_received_first_frame)
             {
                 _has_received_first_frame = true;

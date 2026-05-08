@@ -32,6 +32,90 @@
             SUCCEEDED(mf_startup_result);
     }
 
+    std::optional<RECT> display_mode_monitor_bounds(HMONITOR monitor)
+    {
+        if (monitor == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        MONITORINFOEXW info{};
+        info.cbSize = sizeof(info);
+        if (!GetMonitorInfoW(monitor, &info) || info.szDevice[0] == L'\0')
+        {
+            return std::nullopt;
+        }
+
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (!EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) ||
+            mode.dmPelsWidth == 0 ||
+            mode.dmPelsHeight == 0)
+        {
+            return std::nullopt;
+        }
+
+        return RECT
+        {
+            mode.dmPosition.x,
+            mode.dmPosition.y,
+            mode.dmPosition.x + static_cast<LONG>(mode.dmPelsWidth),
+            mode.dmPosition.y + static_cast<LONG>(mode.dmPelsHeight)
+        };
+    }
+
+    std::optional<RECT> dxgi_monitor_bounds(HMONITOR monitor)
+    {
+        if (monitor == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        ComPtr<IDXGIFactory1> factory;
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        {
+            return std::nullopt;
+        }
+
+        for (UINT adapter_index = 0;; ++adapter_index)
+        {
+            ComPtr<IDXGIAdapter1> adapter;
+            auto result = factory->EnumAdapters1(adapter_index, &adapter);
+            if (result == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+
+            if (FAILED(result))
+            {
+                continue;
+            }
+
+            for (UINT output_index = 0;; ++output_index)
+            {
+                ComPtr<IDXGIOutput> output;
+                result = adapter->EnumOutputs(output_index, &output);
+                if (result == DXGI_ERROR_NOT_FOUND)
+                {
+                    break;
+                }
+
+                if (FAILED(result))
+                {
+                    continue;
+                }
+
+                DXGI_OUTPUT_DESC output_desc{};
+                if (SUCCEEDED(output->GetDesc(&output_desc)) && output_desc.Monitor == monitor)
+                {
+                    return output_desc.DesktopCoordinates;
+                }
+            }
+        }
+
+        return std::nullopt;
+    }
+
     std::vector<monitor_info> enumerate_monitors()
     {
         std::vector<monitor_info> monitors;
@@ -49,9 +133,21 @@
                     return TRUE;
                 }
 
+                auto monitor_bounds = display_mode_monitor_bounds(monitor);
+                if (!monitor_bounds.has_value())
+                {
+                    monitor_bounds = dxgi_monitor_bounds(monitor);
+                }
+
+                auto resolved_bounds = monitor_bounds.value_or(info.rcMonitor);
+                if (!rect_has_area(resolved_bounds))
+                {
+                    resolved_bounds = info.rcMonitor;
+                }
+
                 collection->push_back({
                     monitor,
-                    info.rcMonitor,
+                    resolved_bounds,
                     (info.dwFlags & MONITORINFOF_PRIMARY) != 0,
                     info.szDevice
                 });

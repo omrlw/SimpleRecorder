@@ -31,11 +31,41 @@
 
         capture_fallback_reason wgc_failure_reason = capture_fallback_reason::none;
         HRESULT wgc_failure_hresult = S_OK;
+        HRESULT dxgi_failure_hresult = S_OK;
         constexpr const char* dxgi_backend_name = "dxgi-desktop-duplication";
         auto start_capture_backend = [&](bool allow_wgc) -> std::unique_ptr<capture_backend>
         {
             std::unique_ptr<capture_backend> started_backend;
             result = E_FAIL;
+            const auto can_use_dxgi =
+                geometry->monitor != nullptr &&
+                can_fallback_to_dxgi(session->source.kind);
+            const auto prefer_dxgi = can_use_dxgi;
+
+            auto try_start_dxgi = [&]() -> bool
+            {
+                if (!can_use_dxgi)
+                {
+                    return false;
+                }
+
+                auto dxgi = std::make_unique<dxgi_duplication_capture_backend>(*d3d, *geometry);
+                result = dxgi->start();
+                if (SUCCEEDED(result))
+                {
+                    session->capture_backend = dxgi->backend_name();
+                    started_backend = std::move(dxgi);
+                    return true;
+                }
+
+                dxgi_failure_hresult = result;
+                return false;
+            };
+
+            if (prefer_dxgi && try_start_dxgi())
+            {
+                return started_backend;
+            }
 
             if (allow_wgc)
             {
@@ -44,6 +74,16 @@
                 result = wgc->start();
                 if (SUCCEEDED(result))
                 {
+                    if (prefer_dxgi && FAILED(dxgi_failure_hresult))
+                    {
+                        record_capture_fallback(
+                            *session,
+                            dxgi_backend_name,
+                            "windows-graphics-capture",
+                            capture_fallback_reason::startup_hresult,
+                            dxgi_failure_hresult);
+                    }
+
                     session->capture_backend = wgc->backend_name();
                     started_backend = std::move(wgc);
                 }
@@ -56,8 +96,8 @@
             }
 
             if (started_backend == nullptr &&
-                geometry->monitor != nullptr &&
-                can_fallback_to_dxgi(session->source.kind))
+                !prefer_dxgi &&
+                can_use_dxgi)
             {
                 if (allow_wgc &&
                     (wgc_failure_reason != capture_fallback_reason::none || FAILED(wgc_failure_hresult)))
@@ -72,13 +112,7 @@
                         wgc_failure_hresult);
                 }
 
-                auto dxgi = std::make_unique<dxgi_duplication_capture_backend>(*d3d, *geometry);
-                result = dxgi->start();
-                if (SUCCEEDED(result))
-                {
-                    session->capture_backend = dxgi->backend_name();
-                    started_backend = std::move(dxgi);
-                }
+                (void)try_start_dxgi();
             }
 
             return started_backend;
@@ -133,6 +167,28 @@
             session->capture_crop_rect = geometry->source_rect;
             session->capture_monitor = geometry->monitor;
             session->capture_window = geometry->window;
+
+            const auto active_source_width = geometry->source_rect.right - geometry->source_rect.left;
+            const auto active_source_height = geometry->source_rect.bottom - geometry->source_rect.top;
+            if (active_source_width > 0 && active_source_height > 0)
+            {
+                session->output_height = resolve_target_height(session->options, active_source_height);
+                session->output_width = resolve_target_width(active_source_width, active_source_height, session->output_height);
+                session->target_frame_rate = resolve_target_frame_rate(
+                    session->options,
+                    session->output_width,
+                    session->output_height,
+                    geometry->monitor,
+                    session->monitor_refresh_rate,
+                    session->fps_cap_reason);
+                session->quality_config = resolve_encoder_quality_config(
+                    session->options,
+                    session->target_frame_rate,
+                    session->output_width,
+                    session->output_height);
+                session->metrics.output_width = session->output_width;
+                session->metrics.output_height = session->output_height;
+            }
         }
 
         if (backend->has_received_first_frame())
@@ -291,6 +347,7 @@
                     {
                         std::scoped_lock lock(session->gate);
                         session->wgc_resize_status = "continued-after-frame-graph-rebuild";
+                        session->crop_resize_mismatch_reason = "wgc-content-size-changed-frame-graph-rebuilt";
                     }
 
                     next_capture_deadline += target_period_qpc;
@@ -327,6 +384,7 @@
                         ++session->copy_dimension_mismatch_count;
                         session->copy_integrity_status = "texture-mismatch-observed";
                         session->copy_integrity_failure_reason = copy_mismatch_reason;
+                        session->crop_resize_mismatch_reason = copy_mismatch_reason;
                     }
                 }
 
@@ -502,6 +560,7 @@
                     slot.captured_at_qpc = copied_frame.captured_at_qpc != 0 ? copied_frame.captured_at_qpc : capture_finished_qpc;
                     slot.capture_duration_qpc = capture_finished_qpc - capture_started_qpc;
                     slot.convert_duration_qpc = convert_finished_qpc - convert_started_qpc;
+                    slot.source_rect = copied_frame.source_rect;
                     slot.sequence = ++session->next_sequence;
                     session->ready_slots.push_back(slot_index);
                     ++session->metrics.captured_frames;

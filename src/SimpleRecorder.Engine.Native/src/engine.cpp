@@ -44,6 +44,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -147,6 +148,7 @@ namespace
         uint64_t duplicated_frame_count = 0;
         uint64_t pacing_overrun_count = 0;
         int64_t represented_duration_qpc = 0;
+        int64_t represented_duration_hns = 0;
         uint32_t peak_queue_depth = 0;
         int64_t total_capture_latency_qpc = 0;
         int64_t total_queue_latency_qpc = 0;
@@ -155,6 +157,9 @@ namespace
         int64_t first_captured_qpc = 0;
         int64_t last_captured_qpc = 0;
         int64_t last_sample_duration_qpc = 0;
+        LONGLONG first_sample_timestamp_hns = -1;
+        LONGLONG last_sample_timestamp_hns = 0;
+        LONGLONG last_sample_duration_hns = 0;
         int32_t output_width = 0;
         int32_t output_height = 0;
     };
@@ -165,14 +170,19 @@ namespace
         uint32_t max_bitrate_bps = 16'000'000;
         uint32_t quality_vs_speed = 65;
         uint32_t gop_size = 60;
+        uint32_t h264_level = eAVEncH264VLevel5_2;
         uint32_t quality_policy_version = 2;
         bool cabac_requested = true;
         bool use_b_frames = false;
         bool low_latency_requested = false;
+        bool real_time_requested = false;
+        bool allow_frame_drops = false;
+        bool frame_rate_conversion_disabled = true;
         bool prefer_quality_video_processing = true;
         bool edge_enhancement_requested = true;
         const char* quality_preset_name = "Balanced";
         const char* rate_control_mode = "PeakConstrainedVBR";
+        const char* h264_level_name = "5.2";
     };
 
     struct recording_session
@@ -233,6 +243,7 @@ namespace
         HRESULT gpu_initialization_hresult = S_OK;
         std::string copy_integrity_status = "not-observed";
         std::string copy_integrity_failure_reason;
+        std::string crop_resize_mismatch_reason = "none";
         uint64_t copy_dimension_mismatch_count = 0;
         bool wgc_startup_attempted = false;
         uint64_t wgc_resize_count = 0;
@@ -445,6 +456,9 @@ namespace
             int64_t captured_at_qpc = 0;
         };
 
+        ComPtr<ID3D11Texture2D> acquire_owned_frame_texture(uint32_t width, uint32_t height);
+        void recycle_owned_frame_texture(ComPtr<ID3D11Texture2D> texture) noexcept;
+        void recycle_ready_frames_locked() noexcept;
         void fail_locked(HRESULT failure, capture_fallback_reason reason) noexcept;
         void normalize_geometry_for_frame_size(int32_t width, int32_t height) noexcept;
         void on_frame_arrived(
@@ -457,6 +471,7 @@ namespace
         mutable std::mutex _gate;
         std::condition_variable _frame_arrived_condition;
         std::deque<queued_frame> _ready_frames;
+        std::deque<ComPtr<ID3D11Texture2D>> _available_frame_textures;
         std::atomic<uint64_t> _queue_drop_count = 0;
         HRESULT _failure = S_OK;
         capture_fallback_reason _failure_reason = capture_fallback_reason::none;
@@ -534,6 +549,25 @@ namespace
         return static_cast<LONGLONG>(qpc_ticks * 10'000'000LL / qpc_frequency());
     }
 
+    double hns_to_millis(int64_t hns_ticks)
+    {
+        return static_cast<double>(hns_ticks) / 10'000.0;
+    }
+
+    LONGLONG frame_timestamp_hns(uint64_t frame_index, int32_t frame_rate)
+    {
+        return static_cast<LONGLONG>(
+            static_cast<long double>(frame_index) * 10'000'000.0L /
+            static_cast<long double>(std::max(frame_rate, 1)));
+    }
+
+    LONGLONG frame_duration_hns(uint64_t frame_index, int32_t frame_rate)
+    {
+        return std::max<LONGLONG>(
+            frame_timestamp_hns(frame_index + 1, frame_rate) - frame_timestamp_hns(frame_index, frame_rate),
+            1);
+    }
+
     bool has_format_support(ID3D11Device* device, DXGI_FORMAT format, UINT required_support) noexcept
     {
         if (device == nullptr)
@@ -549,6 +583,18 @@ namespace
     int64_t frame_duration_qpc(int32_t frame_rate)
     {
         return std::max<int64_t>(qpc_frequency() / std::max(frame_rate, 1), 1);
+    }
+
+    int32_t scale_coordinate(int32_t value, int32_t from_extent, int32_t to_extent) noexcept
+    {
+        if (from_extent <= 0 || to_extent <= 0)
+        {
+            return 0;
+        }
+
+        return static_cast<int32_t>(std::llround(
+            static_cast<double>(value) * static_cast<double>(to_extent) /
+            static_cast<double>(from_extent)));
     }
 
     bool requires_hardware_encode(const recording_session& session) noexcept
@@ -600,8 +646,59 @@ namespace
         return sr_result_ok;
     }
 
+    std::optional<RECT> display_mode_monitor_bounds(HMONITOR monitor);
+    std::optional<RECT> dxgi_monitor_bounds(HMONITOR monitor);
+
     RECT virtual_screen_rect()
     {
+        RECT bounds{};
+        bool has_bounds = false;
+        std::pair<RECT*, bool*> state{ &bounds, &has_bounds };
+
+        EnumDisplayMonitors(
+            nullptr,
+            nullptr,
+            [](HMONITOR monitor, HDC, LPRECT, LPARAM parameter) -> BOOL
+            {
+                auto* state = reinterpret_cast<std::pair<RECT*, bool*>*>(parameter);
+                MONITORINFOEXW info{};
+                info.cbSize = sizeof(info);
+                if (!GetMonitorInfoW(monitor, &info))
+                {
+                    return TRUE;
+                }
+
+                auto monitor_bounds = display_mode_monitor_bounds(monitor);
+                if (!monitor_bounds.has_value())
+                {
+                    monitor_bounds = dxgi_monitor_bounds(monitor);
+                }
+
+                auto resolved_bounds = monitor_bounds.value_or(info.rcMonitor);
+                if (resolved_bounds.right <= resolved_bounds.left || resolved_bounds.bottom <= resolved_bounds.top)
+                {
+                    resolved_bounds = info.rcMonitor;
+                }
+
+                if (!*state->second)
+                {
+                    *state->first = resolved_bounds;
+                    *state->second = true;
+                    return TRUE;
+                }
+
+                RECT merged{};
+                UnionRect(&merged, state->first, &resolved_bounds);
+                *state->first = merged;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&state));
+
+        if (has_bounds)
+        {
+            return bounds;
+        }
+
         const auto left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         const auto top = GetSystemMetrics(SM_YVIRTUALSCREEN);
         const auto width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -944,8 +1041,8 @@ namespace
         if (target_frame_rate > 60)
         {
             bitrate_kbps = static_cast<int32_t>(
-                std::lround(static_cast<double>(bitrate_kbps) * (static_cast<double>(target_frame_rate) / 60.0) * 1.05));
-            quality_vs_speed = std::min<uint32_t>(quality_vs_speed, 58);
+                std::lround(static_cast<double>(bitrate_kbps) * (static_cast<double>(target_frame_rate) / 60.0) * 0.70));
+            quality_vs_speed = std::min<uint32_t>(quality_vs_speed, 28);
             low_latency_requested = true;
             prefer_quality_video_processing = false;
             edge_enhancement_requested = false;
@@ -967,6 +1064,9 @@ namespace
         config.cabac_requested = options.quality_preset != 2;
         config.use_b_frames = false;
         config.low_latency_requested = low_latency_requested;
+        config.real_time_requested = false;
+        config.allow_frame_drops = false;
+        config.frame_rate_conversion_disabled = true;
         config.prefer_quality_video_processing = prefer_quality_video_processing;
         config.edge_enhancement_requested = edge_enhancement_requested;
         config.quality_preset_name = resolve_quality_preset_name(options);
@@ -1062,6 +1162,29 @@ namespace
             return result;
         }
 
+        result = set_property_store_bool(store.Get(), CODECAPI_AVEncCommonRealTime, config.real_time_requested);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = set_property_store_uint32(store.Get(), CODECAPI_AVEncCommonAllowFrameDrops, config.allow_frame_drops ? TRUE : FALSE);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = set_property_store_uint32(
+            store.Get(),
+            CODECAPI_AVEncVideoOutputFrameRateConversion,
+            config.frame_rate_conversion_disabled
+                ? eAVEncVideoOutputFrameRateConversion_Disable
+                : eAVEncVideoOutputFrameRateConversion_Enable);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
         result = set_property_store_bool(store.Get(), CODECAPI_AVEncH264CABACEnable, config.cabac_requested);
         if (FAILED(result))
         {
@@ -1074,7 +1197,7 @@ namespace
     HRESULT create_encoder_input_attributes(const encoder_quality_config& config, ComPtr<IMFAttributes>& attributes)
     {
         attributes.Reset();
-        auto result = MFCreateAttributes(&attributes, 7);
+        auto result = MFCreateAttributes(&attributes, 10);
         if (FAILED(result))
         {
             return result;
@@ -1111,6 +1234,28 @@ namespace
         }
 
         result = attributes->SetUINT32(CODECAPI_AVEncMPVDefaultBPictureCount, config.use_b_frames ? 1 : 0);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = attributes->SetUINT32(CODECAPI_AVEncCommonRealTime, config.real_time_requested ? TRUE : FALSE);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = attributes->SetUINT32(CODECAPI_AVEncCommonAllowFrameDrops, config.allow_frame_drops ? TRUE : FALSE);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = attributes->SetUINT32(
+            CODECAPI_AVEncVideoOutputFrameRateConversion,
+            config.frame_rate_conversion_disabled
+                ? eAVEncVideoOutputFrameRateConversion_Disable
+                : eAVEncVideoOutputFrameRateConversion_Enable);
         if (FAILED(result))
         {
             return result;

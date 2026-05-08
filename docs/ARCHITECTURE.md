@@ -21,12 +21,13 @@ The app is intentionally simple at the UI layer and technical in the engine. Use
 
 ## Recording Pipeline
 - Source: display, window, or physical virtual-desktop region.
-- Capture: prefer Windows Graphics Capture where it fits.
-- Fallback: use DXGI Desktop Duplication for supported desktop capture; use GDI only when no compatible hardware graphics adapter is detected.
-- Frame processing: crop, scale, normalize, and convert frames in D3D11 where possible.
+- Capture: prefer DXGI Desktop Duplication for display/region capture, because it tracks desktop presents more closely; use Windows Graphics Capture for window capture and as the display/region fallback where DXGI cannot start.
+- Fallback: use GDI only when no compatible hardware graphics adapter is detected.
+- Frame processing: crop, aspect-fit scale, normalize, and convert frames in D3D11 where possible. Display geometry uses DXGI physical output bounds when Win32 monitor rectangles are DPI-virtualized, and WGC `ContentSize` can correct the source/output geometry before the GPU graph is exposed to the encoder.
 - Encode: write H.264 MP4 through Media Foundation, requiring verified hardware encode whenever a real GPU/iGPU is present.
-- 120 FPS mode: `frame_rate = 0` targets `120` FPS, still records monitor refresh telemetry, respects stricter H.264 level limits, and writes a constant output cadence so MP4 metadata matches the selected target while repeated frames fill only missing capture slots.
-- Metadata: write `.srrec/manifest.json` next to the MP4 for backend, encoder, color, output, timing, GPU detection, CPU fallback blocking, and texture-copy integrity telemetry.
+- 120 FPS mode: `frame_rate = 0` targets `120` FPS, still records monitor refresh telemetry, requests H.264 level 5.2, uses a latency-oriented H.264 speed/bitrate policy, disables encoder frame dropping/frame-rate conversion, and writes a constant output cadence so repeated frames fill only missing capture slots.
+- WGC ownership: copy each `Direct3D11CaptureFrame` surface into an owned texture while the frame is still checked out, using `ContentSize` as the valid source rectangle before queueing it for the capture loop.
+- Metadata: write `.srrec/manifest.json` next to the MP4 for backend, encoder, color, output, geometry, timing, GPU detection, CPU fallback blocking, and texture-copy integrity telemetry.
 
 ## Product Constraints
 - H.264 is the active product codec.
@@ -38,7 +39,7 @@ The app is intentionally simple at the UI layer and technical in the engine. Use
 ## Native Source Layout
 `SimpleRecorder.Engine.Native/src/engine.cpp` owns the ABI/export implementation. Internal engine responsibilities are split into `src/engine/*.inl` partitions included by `engine.cpp`:
 - `media_geometry.inl`: monitor/source geometry and D3D setup.
-- `frame_graph.inl`: crop, scale, and pixel conversion.
+- `frame_graph.inl`: crop, aspect-fit scale, and pixel conversion.
 - `encoder_mf.inl`: Media Foundation H.264 writer.
 - `capture_backends.inl`: WGC and DXGI capture.
 - `legacy_gdi_pipeline.inl`: compatibility capture.

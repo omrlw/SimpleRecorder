@@ -366,6 +366,12 @@
             return result;
         }
 
+        result = output_type->SetUINT32(MF_MT_MPEG2_LEVEL, session.quality_config.h264_level);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
         result = MFSetAttributeSize(output_type.Get(), MF_MT_FRAME_SIZE, static_cast<UINT32>(session.output_width), static_cast<UINT32>(session.output_height));
         if (FAILED(result))
         {

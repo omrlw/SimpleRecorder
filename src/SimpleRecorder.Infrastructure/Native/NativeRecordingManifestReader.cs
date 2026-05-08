@@ -112,9 +112,21 @@ internal static class NativeRecordingManifestReader
                 D3dOutputColorSpace: ReadString(root, "d3dOutputColorSpace") ?? "unknown",
                 QualityPolicyVersion: ReadInt32(root, "qualityPolicyVersion"),
                 IsEncoderLowLatency: ReadBoolean(root, "encoderLowLatency"),
+                IsEncoderRealTime: ReadBoolean(root, "encoderRealTime"),
+                IsEncoderFrameDropsAllowed: ReadBoolean(root, "encoderAllowFrameDrops"),
+                EncoderFrameRateConversion: ReadString(root, "encoderFrameRateConversion") ?? "unknown",
                 VideoProcessorUsage: ReadString(root, "videoProcessorUsage") ?? "unknown",
                 IsEdgeEnhancementRequested: ReadBoolean(root, "edgeEnhancementRequested"),
-                IsEdgeEnhancementApplied: ReadBoolean(root, "edgeEnhancementApplied"));
+                IsEdgeEnhancementApplied: ReadBoolean(root, "edgeEnhancementApplied"),
+                CaptureFrameRate: ReadDouble(root, "captureFrameRate"),
+                EncodeContainerFrameRate: ReadInt32(root, "encodeContainerFrameRate"),
+                DuplicatedFrameRatio: ReadDouble(root, "duplicatedFrameRatio"),
+                H264Level: ReadString(root, "h264Level") ?? "unknown",
+                H264LevelValue: ReadInt32(root, "h264LevelValue"),
+                CropResizeMismatchReason: ReadString(root, "cropResizeMismatchReason") ?? "none",
+                FirstSampleTimestampHns: ReadInt64(root, "firstSampleTimestampHns"),
+                LastSampleTimestampHns: ReadInt64(root, "lastSampleTimestampHns"),
+                LastSampleDurationHns: ReadInt64(root, "lastSampleDurationHns"));
         }
         catch
         {

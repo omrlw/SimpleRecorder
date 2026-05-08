@@ -307,13 +307,40 @@
             clamped_source = full_input;
         }
 
+        const auto source_width = std::max<int32_t>(clamped_source.right - clamped_source.left, 1);
+        const auto source_height = std::max<int32_t>(clamped_source.bottom - clamped_source.top, 1);
         RECT destination_rect{ 0, 0, _output_width, _output_height };
+        const auto width_for_full_height = static_cast<int32_t>(
+            std::llround(static_cast<double>(_output_height) * static_cast<double>(source_width) /
+                static_cast<double>(source_height)));
+        const auto height_for_full_width = static_cast<int32_t>(
+            std::llround(static_cast<double>(_output_width) * static_cast<double>(source_height) /
+                static_cast<double>(source_width)));
+        if (width_for_full_height <= _output_width)
+        {
+            const auto fitted_width = std::max(width_for_full_height, 1);
+            destination_rect.left = (_output_width - fitted_width) / 2;
+            destination_rect.right = destination_rect.left + fitted_width;
+        }
+        else
+        {
+            const auto fitted_height = std::max(height_for_full_width, 1);
+            destination_rect.top = (_output_height - fitted_height) / 2;
+            destination_rect.bottom = destination_rect.top + fitted_height;
+        }
 
         _d3d.video_context->VideoProcessorSetStreamFrameFormat(_processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
         _d3d.video_context->VideoProcessorSetStreamSourceRect(_processor.Get(), 0, TRUE, &clamped_source);
         _d3d.video_context->VideoProcessorSetStreamDestRect(_processor.Get(), 0, TRUE, &destination_rect);
-        _d3d.video_context->VideoProcessorSetOutputTargetRect(_processor.Get(), TRUE, &destination_rect);
-        _d3d.video_context->VideoProcessorSetOutputBackgroundColor(_processor.Get(), FALSE, nullptr);
+        RECT output_target_rect{ 0, 0, _output_width, _output_height };
+        _d3d.video_context->VideoProcessorSetOutputTargetRect(_processor.Get(), TRUE, &output_target_rect);
+
+        D3D11_VIDEO_COLOR background_color{};
+        background_color.YCbCr.A = 1.0f;
+        background_color.YCbCr.Y = 0.0625f;
+        background_color.YCbCr.Cb = 0.5f;
+        background_color.YCbCr.Cr = 0.5f;
+        _d3d.video_context->VideoProcessorSetOutputBackgroundColor(_processor.Get(), TRUE, &background_color);
 
         D3D11_VIDEO_PROCESSOR_COLOR_SPACE input_color_space{};
         input_color_space.RGB_Range = 0;

@@ -243,7 +243,7 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             ? (CaptureSourceKind)status.ActiveSourceKind
             : CaptureSourceKind.Display;
 
-        if (_activeSource is null || _activeSource.Kind != sourceKind)
+        if (_activeSource is null && contractState is not (RecorderState.Idle or RecorderState.SourceSelected))
         {
             _activeSource = NativeStructMapper.CreateSourceStub(sourceKind);
         }

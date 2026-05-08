@@ -63,6 +63,23 @@
         return escaped;
     }
 
+    void write_json_rect(std::ostringstream& json, const char* property_name, const RECT& rect, bool trailing_comma)
+    {
+        json << "  \"" << property_name << "\": { "
+             << "\"left\": " << rect.left << ", "
+             << "\"top\": " << rect.top << ", "
+             << "\"right\": " << rect.right << ", "
+             << "\"bottom\": " << rect.bottom << ", "
+             << "\"width\": " << std::max<int32_t>(rect.right - rect.left, 0) << ", "
+             << "\"height\": " << std::max<int32_t>(rect.bottom - rect.top, 0) << " }";
+        if (trailing_comma)
+        {
+            json << ",";
+        }
+
+        json << "\n";
+    }
+
     const char* source_kind_name(int32_t source_kind)
     {
         switch (source_kind)
@@ -132,27 +149,59 @@
         session.capture_fallback_hresult = hresult;
     }
 
-    double compute_average_frames_per_second(const recording_metrics& metrics)
+    double compute_capture_frame_rate(const recording_metrics& metrics)
     {
-        if (metrics.encoded_frames == 0 || metrics.first_captured_qpc == 0 || metrics.last_captured_qpc == 0)
+        if (metrics.captured_frames < 2 || metrics.first_captured_qpc == 0 || metrics.last_captured_qpc == 0)
         {
             return 0.0;
         }
 
-        const auto represented_duration_qpc =
-            (metrics.last_captured_qpc - metrics.first_captured_qpc) + std::max<int64_t>(metrics.last_sample_duration_qpc, 1);
-        if (represented_duration_qpc <= 0)
+        const auto capture_span_qpc = metrics.last_captured_qpc - metrics.first_captured_qpc;
+        if (capture_span_qpc <= 0)
+        {
+            return 0.0;
+        }
+
+        return static_cast<double>(metrics.captured_frames - 1) * static_cast<double>(qpc_frequency()) /
+            static_cast<double>(capture_span_qpc);
+    }
+
+    double compute_average_frames_per_second(const recording_metrics& metrics)
+    {
+        if (metrics.encoded_frames == 0)
+        {
+            return 0.0;
+        }
+
+        if (metrics.represented_duration_hns > 0)
+        {
+            return static_cast<double>(metrics.encoded_frames) * 10'000'000.0 /
+                static_cast<double>(metrics.represented_duration_hns);
+        }
+
+        if (metrics.represented_duration_qpc <= 0)
         {
             return 0.0;
         }
 
         return static_cast<double>(metrics.encoded_frames) * static_cast<double>(qpc_frequency()) /
-            static_cast<double>(represented_duration_qpc);
+            static_cast<double>(metrics.represented_duration_qpc);
     }
 
     double compute_effective_frame_rate(const recording_metrics& metrics)
     {
-        if (metrics.encoded_frames == 0 || metrics.represented_duration_qpc <= 0)
+        if (metrics.encoded_frames == 0)
+        {
+            return 0.0;
+        }
+
+        if (metrics.represented_duration_hns > 0)
+        {
+            return static_cast<double>(metrics.encoded_frames) * 10'000'000.0 /
+                static_cast<double>(metrics.represented_duration_hns);
+        }
+
+        if (metrics.represented_duration_qpc <= 0)
         {
             return 0.0;
         }
@@ -175,8 +224,28 @@
             return 0.0;
         }
 
+        if (session.metrics.represented_duration_hns > 0)
+        {
+            const auto wall_duration_hns =
+                static_cast<double>(wall_duration_qpc) * 10'000'000.0 / static_cast<double>(qpc_frequency());
+            return wall_duration_hns <= 0.0
+                ? 0.0
+                : static_cast<double>(session.metrics.represented_duration_hns) / wall_duration_hns;
+        }
+
         return static_cast<double>(session.metrics.represented_duration_qpc) /
             static_cast<double>(wall_duration_qpc);
+    }
+
+    double compute_duplicated_frame_ratio(const recording_metrics& metrics)
+    {
+        if (metrics.encoded_frames == 0)
+        {
+            return 0.0;
+        }
+
+        return static_cast<double>(metrics.duplicated_frame_count) /
+            static_cast<double>(metrics.encoded_frames);
     }
 
     double compute_average_latency_millis(int64_t total_latency_qpc, uint64_t sample_count)
