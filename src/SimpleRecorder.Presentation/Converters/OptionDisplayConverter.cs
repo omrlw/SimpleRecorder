@@ -8,20 +8,24 @@ public sealed class OptionDisplayConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, string language) =>
         value switch
         {
-            FrameRateOption frameRate => $"{(int)frameRate}fps",
+            FrameRateOption.Monitor => "120 fps",
+            FrameRateOption frameRate => $"{(int)frameRate} fps",
             CountdownOption countdown => countdown == CountdownOption.Off ? "Off" : $"{(int)countdown}s",
             ResolutionOption resolution => resolution switch
             {
                 ResolutionOption.Auto => "Auto",
+                ResolutionOption.P480 => "480p",
                 ResolutionOption.P720 => "720p",
                 ResolutionOption.P1080 => "1080p",
+                ResolutionOption.P1440 => "1440p",
+                ResolutionOption.P2160 => "4K",
                 _ => resolution.ToString()
             },
             QualityPreset preset => preset switch
             {
+                QualityPreset.Quality => "Quality",
                 QualityPreset.Balanced => "Balanced",
-                QualityPreset.Sharp => "Sharp",
-                QualityPreset.SmallFile => "Small file",
+                QualityPreset.Low => "Low",
                 _ => preset.ToString()
             },
             EncoderPreference preference => preference switch

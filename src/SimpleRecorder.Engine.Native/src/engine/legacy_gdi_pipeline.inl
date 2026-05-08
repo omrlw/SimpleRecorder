@@ -139,6 +139,10 @@
         {
             std::scoped_lock lock(session.gate);
             session.stop_requested = true;
+            if (session.completed_qpc == 0)
+            {
+                session.completed_qpc = qpc_now();
+            }
         }
 
         session.ready_condition.notify_all();
@@ -157,6 +161,10 @@
             session.failure = failure;
             session.failure_reason = std::move(reason);
             session.stop_requested = true;
+            if (session.completed_qpc == 0)
+            {
+                session.completed_qpc = qpc_now();
+            }
         }
 
         session.ready_condition.notify_all();
@@ -277,10 +285,13 @@
             return result;
         }
 
-        result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
-        if (FAILED(result))
+        if (session.quality_config.low_latency_requested)
         {
-            return result;
+            result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+            if (FAILED(result))
+            {
+                return result;
+            }
         }
 
         result = attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);

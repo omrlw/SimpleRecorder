@@ -11,6 +11,9 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleRecorder.Presentation", "src\SimpleRecorder.Presentation\SimpleRecorder.Presentation.csproj", "{9B1D0994-65CD-4118-9150-89FE19A47C21}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleRecorder.App", "src\SimpleRecorder.App\SimpleRecorder.App.csproj", "{9B36B36B-E437-41FE-9EF6-563A775B4FBA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{DFF31A28-8FC6-4A86-8742-E44D71DFD623} = {DFF31A28-8FC6-4A86-8742-E44D71DFD623}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SimpleRecorder.Engine.Native", "src\SimpleRecorder.Engine.Native\SimpleRecorder.Engine.Native.vcxproj", "{DFF31A28-8FC6-4A86-8742-E44D71DFD623}"
 EndProject

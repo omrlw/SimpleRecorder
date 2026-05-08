@@ -9,7 +9,7 @@
             return;
         }
 
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
         media_foundation_scope media_foundation;
         if (!media_foundation.is_ready())
@@ -59,19 +59,83 @@
 
             const auto default_duration_qpc = frame_duration_qpc(session->target_frame_rate);
             size_t pending_slot_index = static_cast<size_t>(-1);
-            auto last_duration_qpc = default_duration_qpc;
+            uint64_t pending_slot_write_count = 0;
+            int64_t next_sample_time_qpc = 0;
+            LONGLONG next_sample_time_hns = 0;
+            auto write_pending_once = [&](gpu_capture_slot& pending_slot, int64_t duration_qpc, bool duplicated_frame)
+            {
+                const auto sample_duration_qpc = std::max<int64_t>(duration_qpc, default_duration_qpc);
+                const auto sample_duration_hns = std::max<LONGLONG>(qpc_to_hns(sample_duration_qpc), 1);
+                const auto encode_started_qpc = qpc_now();
+                encoder.write_slot(pending_slot, next_sample_time_hns, sample_duration_hns);
+                const auto encode_finished_qpc = qpc_now();
+
+                {
+                    std::scoped_lock lock(session->gate);
+                    ++session->metrics.encoded_frames;
+                    if (duplicated_frame)
+                    {
+                        ++session->metrics.duplicated_frame_count;
+                    }
+                    session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
+                    session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
+                    session->metrics.last_sample_duration_qpc = sample_duration_qpc;
+                    session->metrics.represented_duration_qpc += sample_duration_qpc;
+                }
+
+                ++pending_slot_write_count;
+                next_sample_time_qpc += sample_duration_qpc;
+                next_sample_time_hns += sample_duration_hns;
+            };
+            auto write_pending_until = [&](int64_t target_time_qpc)
+            {
+                if (pending_slot_index == static_cast<size_t>(-1))
+                {
+                    return;
+                }
+
+                auto& pending_slot = session->gpu_slots[pending_slot_index];
+                while (next_sample_time_qpc < target_time_qpc && SUCCEEDED(session->failure))
+                {
+                    write_pending_once(pending_slot, default_duration_qpc, pending_slot_write_count > 0);
+                }
+            };
 
             while (true)
             {
                 size_t ready_slot_index = static_cast<size_t>(-1);
+                bool should_duplicate_pending_slot = false;
                 {
                     std::unique_lock lock(session->gate);
-                    session->ready_condition.wait(lock, [&session]
+                    if (pending_slot_index == static_cast<size_t>(-1))
                     {
-                        return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
-                    });
+                        session->ready_condition.wait(lock, [&session]
+                        {
+                            return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
+                        });
+                    }
+                    else
+                    {
+                        session->ready_condition.wait_for(lock, std::chrono::milliseconds(std::max<int32_t>(
+                            1,
+                            static_cast<int32_t>(qpc_to_millis(default_duration_qpc)))), [&session]
+                        {
+                            return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
+                        });
+                    }
 
-                    if (session->ready_slots.empty())
+                    if (!session->ready_slots.empty())
+                    {
+                        ready_slot_index = session->ready_slots.front();
+                        session->ready_slots.pop_front();
+                    }
+                    else if (pending_slot_index != static_cast<size_t>(-1) &&
+                        !session->capture_finished &&
+                        SUCCEEDED(session->failure))
+                    {
+                        should_duplicate_pending_slot = true;
+                    }
+                    else
                     {
                         if (session->capture_finished || FAILED(session->failure))
                         {
@@ -80,53 +144,43 @@
 
                         continue;
                     }
-
-                    ready_slot_index = session->ready_slots.front();
-                    session->ready_slots.pop_front();
                 }
 
                 if (pending_slot_index == static_cast<size_t>(-1))
                 {
                     pending_slot_index = ready_slot_index;
+                    pending_slot_write_count = 0;
                     continue;
                 }
 
-                auto& pending_slot = session->gpu_slots[pending_slot_index];
-                const auto current_capture_qpc = session->gpu_slots[ready_slot_index].captured_at_qpc;
-                const auto sample_duration_qpc = std::max<int64_t>(current_capture_qpc - pending_slot.captured_at_qpc, 1);
-                const auto encode_started_qpc = qpc_now();
-
-                encoder.write_slot(pending_slot, qpc_to_hns(pending_slot.captured_at_qpc - session->started_qpc), qpc_to_hns(sample_duration_qpc));
-                const auto encode_finished_qpc = qpc_now();
-
+                if (should_duplicate_pending_slot)
                 {
-                    std::scoped_lock lock(session->gate);
-                    ++session->metrics.encoded_frames;
-                    session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
-                    session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
-                    session->metrics.last_sample_duration_qpc = sample_duration_qpc;
+                    write_pending_until(next_sample_time_qpc + default_duration_qpc);
+                    continue;
                 }
 
+                const auto ready_capture_offset_qpc = std::max<int64_t>(
+                    session->gpu_slots[ready_slot_index].captured_at_qpc - session->started_qpc,
+                    0);
+                write_pending_until(ready_capture_offset_qpc);
                 recycle_slot(*session, pending_slot_index);
                 pending_slot_index = ready_slot_index;
-                last_duration_qpc = sample_duration_qpc;
+                pending_slot_write_count = 0;
             }
 
             if (pending_slot_index != static_cast<size_t>(-1) && SUCCEEDED(session->failure))
             {
-                auto& pending_slot = session->gpu_slots[pending_slot_index];
-                const auto encode_started_qpc = qpc_now();
-                encoder.write_slot(pending_slot, qpc_to_hns(pending_slot.captured_at_qpc - session->started_qpc), qpc_to_hns(last_duration_qpc));
-                const auto encode_finished_qpc = qpc_now();
-
+                int64_t completed_qpc = 0;
                 {
                     std::scoped_lock lock(session->gate);
-                    ++session->metrics.encoded_frames;
-                    session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
-                    session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
-                    session->metrics.last_sample_duration_qpc = last_duration_qpc;
+                    completed_qpc = session->completed_qpc != 0 ? session->completed_qpc : qpc_now();
                 }
 
+                write_pending_until(std::max<int64_t>(completed_qpc - session->started_qpc, 0));
+            }
+
+            if (pending_slot_index != static_cast<size_t>(-1))
+            {
                 recycle_slot(*session, pending_slot_index);
             }
 
@@ -199,20 +253,83 @@
         }
 
         const auto default_duration_qpc = frame_duration_qpc(session->target_frame_rate);
+        const auto default_duration_hns = qpc_to_hns(default_duration_qpc);
         size_t pending_slot_index = static_cast<size_t>(-1);
-        auto last_duration_qpc = default_duration_qpc;
+        uint64_t pending_slot_write_count = 0;
+        int64_t next_sample_time_qpc = 0;
+        LONGLONG next_sample_time_hns = 0;
+        auto write_pending_until = [&](int64_t target_time_qpc) -> HRESULT
+        {
+            if (pending_slot_index == static_cast<size_t>(-1))
+            {
+                return S_OK;
+            }
+
+            auto& pending_slot = session->legacy_slots[pending_slot_index];
+            while (next_sample_time_qpc < target_time_qpc && SUCCEEDED(session->failure))
+            {
+                const auto encode_started_qpc = qpc_now();
+                const auto result = write_legacy_sample(sink_writer.Get(), stream_index, pending_slot, next_sample_time_hns, default_duration_hns);
+                const auto encode_finished_qpc = qpc_now();
+                if (FAILED(result))
+                {
+                    return result;
+                }
+
+                {
+                    std::scoped_lock lock(session->gate);
+                    ++session->metrics.encoded_frames;
+                    if (pending_slot_write_count > 0)
+                    {
+                        ++session->metrics.duplicated_frame_count;
+                    }
+                    session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
+                    session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
+                    session->metrics.last_sample_duration_qpc = default_duration_qpc;
+                    session->metrics.represented_duration_qpc += default_duration_qpc;
+                }
+
+                ++pending_slot_write_count;
+                next_sample_time_qpc += default_duration_qpc;
+                next_sample_time_hns += default_duration_hns;
+            }
+
+            return S_OK;
+        };
 
         while (true)
         {
             size_t ready_slot_index = static_cast<size_t>(-1);
+            bool should_duplicate_pending_slot = false;
             {
                 std::unique_lock lock(session->gate);
-                session->ready_condition.wait(lock, [&session]
+                if (pending_slot_index == static_cast<size_t>(-1))
                 {
-                    return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
-                });
+                    session->ready_condition.wait(lock, [&session]
+                    {
+                        return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
+                    });
+                }
+                else
+                {
+                    session->ready_condition.wait_for(lock, std::chrono::milliseconds(std::max<int32_t>(
+                        1,
+                        static_cast<int32_t>(qpc_to_millis(default_duration_qpc)))), [&session]
+                    {
+                        return !session->ready_slots.empty() || session->capture_finished || FAILED(session->failure);
+                    });
+                }
 
-                if (session->ready_slots.empty())
+                if (!session->ready_slots.empty())
+                {
+                    ready_slot_index = session->ready_slots.front();
+                    session->ready_slots.pop_front();
+                }
+                else if (pending_slot_index != static_cast<size_t>(-1) && !session->capture_finished && SUCCEEDED(session->failure))
+                {
+                    should_duplicate_pending_slot = true;
+                }
+                else
                 {
                     if (session->capture_finished || FAILED(session->failure))
                     {
@@ -221,67 +338,65 @@
 
                     continue;
                 }
-
-                ready_slot_index = session->ready_slots.front();
-                session->ready_slots.pop_front();
             }
 
             if (pending_slot_index == static_cast<size_t>(-1))
             {
                 pending_slot_index = ready_slot_index;
+                pending_slot_write_count = 0;
                 continue;
             }
 
-            auto& pending_slot = session->legacy_slots[pending_slot_index];
-            const auto current_capture_qpc = session->legacy_slots[ready_slot_index].captured_at_qpc;
-            const auto sample_duration_qpc = std::max<int64_t>(current_capture_qpc - pending_slot.captured_at_qpc, 1);
-            const auto encode_started_qpc = qpc_now();
-            const auto result = write_legacy_sample(sink_writer.Get(), stream_index, pending_slot, qpc_to_hns(pending_slot.captured_at_qpc - session->started_qpc), qpc_to_hns(sample_duration_qpc));
-            const auto encode_finished_qpc = qpc_now();
+            if (should_duplicate_pending_slot)
+            {
+                const auto result = write_pending_until(next_sample_time_qpc + default_duration_qpc);
+                if (FAILED(result))
+                {
+                    fail_session(*session, result, L"Failed to write a repeated legacy video sample.");
+                    recycle_slot(*session, pending_slot_index);
+                    pending_slot_index = static_cast<size_t>(-1);
+                    break;
+                }
+
+                continue;
+            }
+
+            const auto ready_capture_offset_qpc = std::max<int64_t>(
+                session->legacy_slots[ready_slot_index].captured_at_qpc - session->started_qpc,
+                0);
+            const auto result = write_pending_until(ready_capture_offset_qpc);
             if (FAILED(result))
             {
                 fail_session(*session, result, L"Failed to write a legacy video sample.");
                 recycle_slot(*session, pending_slot_index);
                 recycle_slot(*session, ready_slot_index);
+                pending_slot_index = static_cast<size_t>(-1);
                 break;
-            }
-
-            {
-                std::scoped_lock lock(session->gate);
-                ++session->metrics.encoded_frames;
-                session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
-                session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
-                session->metrics.last_sample_duration_qpc = sample_duration_qpc;
             }
 
             recycle_slot(*session, pending_slot_index);
             pending_slot_index = ready_slot_index;
-            last_duration_qpc = sample_duration_qpc;
+            pending_slot_write_count = 0;
         }
 
         if (pending_slot_index != static_cast<size_t>(-1) && SUCCEEDED(session->failure))
         {
-            auto& pending_slot = session->legacy_slots[pending_slot_index];
-            const auto encode_started_qpc = qpc_now();
-            const auto result = write_legacy_sample(sink_writer.Get(), stream_index, pending_slot, qpc_to_hns(pending_slot.captured_at_qpc - session->started_qpc), qpc_to_hns(last_duration_qpc));
-            const auto encode_finished_qpc = qpc_now();
+            int64_t completed_qpc = 0;
+            {
+                std::scoped_lock lock(session->gate);
+                completed_qpc = session->completed_qpc != 0 ? session->completed_qpc : qpc_now();
+            }
+
+            const auto result = write_pending_until(std::max<int64_t>(completed_qpc - session->started_qpc, 0));
             if (FAILED(result))
             {
                 fail_session(*session, result, L"Failed to write the final legacy video sample.");
-                recycle_slot(*session, pending_slot_index);
             }
-            else
-            {
-                {
-                    std::scoped_lock lock(session->gate);
-                    ++session->metrics.encoded_frames;
-                    session->metrics.total_queue_latency_qpc += std::max<int64_t>(0, encode_started_qpc - pending_slot.captured_at_qpc);
-                    session->metrics.total_encode_latency_qpc += encode_finished_qpc - encode_started_qpc;
-                    session->metrics.last_sample_duration_qpc = last_duration_qpc;
-                }
+        }
 
-                recycle_slot(*session, pending_slot_index);
-            }
+        if (pending_slot_index != static_cast<size_t>(-1))
+        {
+            recycle_slot(*session, pending_slot_index);
         }
 
         if (SUCCEEDED(session->failure))

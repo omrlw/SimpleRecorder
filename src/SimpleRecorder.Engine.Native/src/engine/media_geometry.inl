@@ -194,6 +194,154 @@
         return geometry;
     }
 
+    bool is_hardware_adapter(IDXGIAdapter1* adapter) noexcept
+    {
+        if (adapter == nullptr)
+        {
+            return false;
+        }
+
+        DXGI_ADAPTER_DESC1 desc{};
+        if (FAILED(adapter->GetDesc1(&desc)))
+        {
+            return false;
+        }
+
+        if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+        {
+            return false;
+        }
+
+        const std::wstring name = desc.Description;
+        return name.find(L"Microsoft Basic Render") == std::wstring::npos &&
+            name.find(L"Microsoft Basic Display") == std::wstring::npos &&
+            name.find(L"WARP") == std::wstring::npos;
+    }
+
+    bool adapter_outputs_monitor(IDXGIAdapter1* adapter, HMONITOR monitor) noexcept
+    {
+        if (adapter == nullptr || monitor == nullptr)
+        {
+            return false;
+        }
+
+        for (UINT output_index = 0;; ++output_index)
+        {
+            ComPtr<IDXGIOutput> output;
+            auto result = adapter->EnumOutputs(output_index, &output);
+            if (result == DXGI_ERROR_NOT_FOUND)
+            {
+                return false;
+            }
+
+            if (FAILED(result))
+            {
+                return false;
+            }
+
+            DXGI_OUTPUT_DESC output_desc{};
+            if (SUCCEEDED(output->GetDesc(&output_desc)) && output_desc.Monitor == monitor)
+            {
+                return true;
+            }
+        }
+    }
+
+    bool same_adapter_luid(IDXGIAdapter1* left, IDXGIAdapter1* right) noexcept
+    {
+        if (left == nullptr || right == nullptr)
+        {
+            return false;
+        }
+
+        DXGI_ADAPTER_DESC1 left_desc{};
+        DXGI_ADAPTER_DESC1 right_desc{};
+        if (FAILED(left->GetDesc1(&left_desc)) || FAILED(right->GetDesc1(&right_desc)))
+        {
+            return false;
+        }
+
+        return left_desc.AdapterLuid.HighPart == right_desc.AdapterLuid.HighPart &&
+            left_desc.AdapterLuid.LowPart == right_desc.AdapterLuid.LowPart;
+    }
+
+    void add_unique_adapter(std::vector<ComPtr<IDXGIAdapter1>>& adapters, ComPtr<IDXGIAdapter1> candidate)
+    {
+        if (candidate == nullptr)
+        {
+            return;
+        }
+
+        for (const auto& adapter : adapters)
+        {
+            if (same_adapter_luid(adapter.Get(), candidate.Get()))
+            {
+                return;
+            }
+        }
+
+        adapters.push_back(candidate);
+    }
+
+    std::vector<ComPtr<IDXGIAdapter1>> enumerate_hardware_adapters(IDXGIFactory1* factory, HMONITOR preferred_monitor)
+    {
+        std::vector<ComPtr<IDXGIAdapter1>> adapters;
+        if (factory == nullptr)
+        {
+            return adapters;
+        }
+
+        for (UINT adapter_index = 0;; ++adapter_index)
+        {
+            ComPtr<IDXGIAdapter1> candidate;
+            auto result = factory->EnumAdapters1(adapter_index, &candidate);
+            if (result == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+
+            if (FAILED(result) || !is_hardware_adapter(candidate.Get()))
+            {
+                continue;
+            }
+
+            if (adapter_outputs_monitor(candidate.Get(), preferred_monitor))
+            {
+                add_unique_adapter(adapters, candidate);
+            }
+        }
+
+        for (UINT adapter_index = 0;; ++adapter_index)
+        {
+            ComPtr<IDXGIAdapter1> candidate;
+            auto result = factory->EnumAdapters1(adapter_index, &candidate);
+            if (result == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+
+            if (FAILED(result) || !is_hardware_adapter(candidate.Get()))
+            {
+                continue;
+            }
+
+            add_unique_adapter(adapters, candidate);
+        }
+
+        return adapters;
+    }
+
+    bool detect_hardware_graphics_adapter() noexcept
+    {
+        ComPtr<IDXGIFactory1> factory;
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        {
+            return false;
+        }
+
+        return !enumerate_hardware_adapters(factory.Get(), nullptr).empty();
+    }
+
     HRESULT create_d3d_context(HMONITOR preferred_monitor, d3d_context& d3d)
     {
         HRESULT result = CreateDXGIFactory1(IID_PPV_ARGS(&d3d.factory));
@@ -202,64 +350,11 @@
             return result;
         }
 
-        if (preferred_monitor != nullptr)
+        auto candidates = enumerate_hardware_adapters(d3d.factory.Get(), preferred_monitor);
+        d3d.hardware_adapter_detected = !candidates.empty();
+        if (candidates.empty())
         {
-            for (UINT adapter_index = 0;; ++adapter_index)
-            {
-                ComPtr<IDXGIAdapter1> candidate_adapter;
-                result = d3d.factory->EnumAdapters1(adapter_index, &candidate_adapter);
-                if (result == DXGI_ERROR_NOT_FOUND)
-                {
-                    break;
-                }
-
-                if (FAILED(result))
-                {
-                    return result;
-                }
-
-                for (UINT output_index = 0;; ++output_index)
-                {
-                    ComPtr<IDXGIOutput> candidate_output;
-                    result = candidate_adapter->EnumOutputs(output_index, &candidate_output);
-                    if (result == DXGI_ERROR_NOT_FOUND)
-                    {
-                        break;
-                    }
-
-                    if (FAILED(result))
-                    {
-                        return result;
-                    }
-
-                    DXGI_OUTPUT_DESC output_desc{};
-                    result = candidate_output->GetDesc(&output_desc);
-                    if (FAILED(result))
-                    {
-                        return result;
-                    }
-
-                    if (output_desc.Monitor == preferred_monitor)
-                    {
-                        d3d.adapter = candidate_adapter;
-                        break;
-                    }
-                }
-
-                if (d3d.adapter != nullptr)
-                {
-                    break;
-                }
-            }
-        }
-
-        if (d3d.adapter == nullptr)
-        {
-            result = d3d.factory->EnumAdapters1(0, &d3d.adapter);
-            if (FAILED(result))
-            {
-                return result;
-            }
+            return DXGI_ERROR_NOT_FOUND;
         }
 
         static const D3D_FEATURE_LEVEL feature_levels[] =
@@ -268,29 +363,35 @@
             D3D_FEATURE_LEVEL_11_0
         };
 
-        UINT creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+        auto create_for_adapter = [&](IDXGIAdapter1* adapter) -> HRESULT
+        {
+            d3d.adapter = adapter;
+            d3d.device.Reset();
+            d3d.context.Reset();
+            d3d.video_device.Reset();
+            d3d.video_context.Reset();
+
+            UINT creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
 #if defined(_DEBUG)
-        creation_flags |= D3D11_CREATE_DEVICE_DEBUG;
+            creation_flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
-        D3D_FEATURE_LEVEL actual_feature_level{};
-        result = D3D11CreateDevice(
-            d3d.adapter.Get(),
-            D3D_DRIVER_TYPE_UNKNOWN,
-            nullptr,
-            creation_flags,
-            feature_levels,
-            static_cast<UINT>(std::size(feature_levels)),
-            D3D11_SDK_VERSION,
-            &d3d.device,
-            &actual_feature_level,
-            &d3d.context);
-        if (FAILED(result))
-        {
-            if ((creation_flags & D3D11_CREATE_DEVICE_DEBUG) != 0)
+            D3D_FEATURE_LEVEL actual_feature_level{};
+            auto create_result = D3D11CreateDevice(
+                d3d.adapter.Get(),
+                D3D_DRIVER_TYPE_UNKNOWN,
+                nullptr,
+                creation_flags,
+                feature_levels,
+                static_cast<UINT>(std::size(feature_levels)),
+                D3D11_SDK_VERSION,
+                &d3d.device,
+                &actual_feature_level,
+                &d3d.context);
+            if (FAILED(create_result) && (creation_flags & D3D11_CREATE_DEVICE_DEBUG) != 0)
             {
                 creation_flags &= ~D3D11_CREATE_DEVICE_DEBUG;
-                result = D3D11CreateDevice(
+                create_result = D3D11CreateDevice(
                     d3d.adapter.Get(),
                     D3D_DRIVER_TYPE_UNKNOWN,
                     nullptr,
@@ -302,52 +403,74 @@
                     &actual_feature_level,
                     &d3d.context);
             }
-        }
 
-        if (FAILED(result))
+            if (FAILED(create_result))
+            {
+                return create_result;
+            }
+
+            ComPtr<ID3D10Multithread> multithread;
+            if (SUCCEEDED(d3d.device.As(&multithread)))
+            {
+                multithread->SetMultithreadProtected(TRUE);
+                d3d.multithread_protected = multithread->GetMultithreadProtected() != FALSE;
+            }
+
+            create_result = d3d.device.As(&d3d.video_device);
+            if (FAILED(create_result))
+            {
+                return create_result;
+            }
+
+            create_result = d3d.context.As(&d3d.video_context);
+            if (FAILED(create_result))
+            {
+                return create_result;
+            }
+
+            if (!has_format_support(
+                    d3d.device.Get(),
+                    DXGI_FORMAT_B8G8R8A8_UNORM,
+                    D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT) ||
+                !has_format_support(
+                    d3d.device.Get(),
+                    DXGI_FORMAT_NV12,
+                    D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT))
+            {
+                return MF_E_INVALIDMEDIATYPE;
+            }
+
+            DXGI_ADAPTER_DESC1 adapter_desc{};
+            create_result = d3d.adapter->GetDesc1(&adapter_desc);
+            if (FAILED(create_result))
+            {
+                return create_result;
+            }
+
+            d3d.adapter_name = adapter_desc.Description;
+            d3d.adapter_luid = adapter_desc.AdapterLuid;
+            return S_OK;
+        };
+
+        HRESULT first_failure = E_FAIL;
+        for (const auto& candidate : candidates)
         {
-            return result;
+            result = create_for_adapter(candidate.Get());
+            if (SUCCEEDED(result))
+            {
+                return S_OK;
+            }
+
+            if (first_failure == E_FAIL)
+            {
+                first_failure = result;
+            }
         }
 
-        ComPtr<ID3D10Multithread> multithread;
-        if (SUCCEEDED(d3d.device.As(&multithread)))
-        {
-            multithread->SetMultithreadProtected(TRUE);
-            d3d.multithread_protected = multithread->GetMultithreadProtected() != FALSE;
-        }
-
-        result = d3d.device.As(&d3d.video_device);
-        if (FAILED(result))
-        {
-            return result;
-        }
-
-        result = d3d.context.As(&d3d.video_context);
-        if (FAILED(result))
-        {
-            return result;
-        }
-
-        if (!has_format_support(
-                d3d.device.Get(),
-                DXGI_FORMAT_B8G8R8A8_UNORM,
-                D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT) ||
-            !has_format_support(
-                d3d.device.Get(),
-                DXGI_FORMAT_NV12,
-                D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT))
-        {
-            return MF_E_INVALIDMEDIATYPE;
-        }
-
-        DXGI_ADAPTER_DESC1 adapter_desc{};
-        result = d3d.adapter->GetDesc1(&adapter_desc);
-        if (FAILED(result))
-        {
-            return result;
-        }
-
-        d3d.adapter_name = adapter_desc.Description;
-        d3d.adapter_luid = adapter_desc.AdapterLuid;
-        return S_OK;
+        d3d.adapter.Reset();
+        d3d.device.Reset();
+        d3d.context.Reset();
+        d3d.video_device.Reset();
+        d3d.video_context.Reset();
+        return first_failure;
     }

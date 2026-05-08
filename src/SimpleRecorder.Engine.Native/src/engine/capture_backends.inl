@@ -2,6 +2,55 @@
 // Windows Graphics Capture and DXGI Desktop Duplication capture backends.
 // Included by engine.cpp inside the native engine anonymous namespace.
 
+    HRESULT copy_texture_to_destination(
+        d3d_context& d3d,
+        ID3D11Texture2D* destination,
+        ID3D11Texture2D* source,
+        std::string& mismatch_reason)
+    {
+        mismatch_reason.clear();
+        if (destination == nullptr || source == nullptr)
+        {
+            return E_INVALIDARG;
+        }
+
+        D3D11_TEXTURE2D_DESC destination_desc{};
+        D3D11_TEXTURE2D_DESC source_desc{};
+        destination->GetDesc(&destination_desc);
+        source->GetDesc(&source_desc);
+
+        if (destination_desc.Format != source_desc.Format)
+        {
+            mismatch_reason = "texture-format-mismatch";
+            return MF_E_INVALIDMEDIATYPE;
+        }
+
+        if (destination_desc.Width == source_desc.Width && destination_desc.Height == source_desc.Height)
+        {
+            d3d.context->CopyResource(destination, source);
+            return S_OK;
+        }
+
+        if (source_desc.Width >= destination_desc.Width && source_desc.Height >= destination_desc.Height)
+        {
+            const D3D11_BOX source_box
+            {
+                0,
+                0,
+                0,
+                destination_desc.Width,
+                destination_desc.Height,
+                1
+            };
+            d3d.context->CopySubresourceRegion(destination, 0, 0, 0, 0, source, 0, &source_box);
+            mismatch_reason = "source-texture-larger-than-capture-slot-copied-region";
+            return S_OK;
+        }
+
+        mismatch_reason = "source-texture-smaller-than-capture-slot";
+        return MF_E_INVALIDMEDIATYPE;
+    }
+
     wgc_capture_backend::wgc_capture_backend(d3d_context& d3d, const resolved_capture_geometry& geometry, const sr_capture_source& source)
         : _d3d(d3d),
           _geometry(geometry),
@@ -51,6 +100,7 @@
             }
 
             const auto capture_size = _item.Size();
+            normalize_geometry_for_frame_size(capture_size.Width, capture_size.Height);
             _frame_pool = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
                 _direct3d_device,
                 winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -117,7 +167,12 @@
         _ready_frames.clear();
         lock.unlock();
 
-        _d3d.context->CopyResource(destination, next.texture.Get());
+        const auto copy_result = copy_texture_to_destination(_d3d, destination, next.texture.Get(), _copy_mismatch_reason);
+        if (FAILED(copy_result))
+        {
+            return copy_result;
+        }
+
         copied_frame.source_rect = _geometry.source_rect;
         copied_frame.captured_at_qpc = next.captured_at_qpc;
         return S_OK;
@@ -181,11 +236,62 @@
         return _first_frame_arrived_qpc;
     }
 
+    bool wgc_capture_backend::consume_resize(resolved_capture_geometry& geometry)
+    {
+        std::scoped_lock lock(_gate);
+        if (!_resize_pending)
+        {
+            return false;
+        }
+
+        geometry = _pending_resize_geometry;
+        _resize_pending = false;
+        return true;
+    }
+
+    bool wgc_capture_backend::current_geometry(resolved_capture_geometry& geometry) const
+    {
+        std::scoped_lock lock(_gate);
+        geometry = _geometry;
+        return rect_has_area(_geometry.capture_item_bounds);
+    }
+
+    std::string wgc_capture_backend::consume_copy_mismatch_reason()
+    {
+        std::scoped_lock lock(_gate);
+        auto reason = std::move(_copy_mismatch_reason);
+        _copy_mismatch_reason.clear();
+        return reason;
+    }
+
     void wgc_capture_backend::fail_locked(HRESULT failure, capture_fallback_reason reason) noexcept
     {
         _failure = failure;
         _failure_reason = reason;
         _frame_arrived_condition.notify_all();
+    }
+
+    void wgc_capture_backend::normalize_geometry_for_frame_size(int32_t width, int32_t height) noexcept
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        _geometry.capture_item_bounds = { 0, 0, width, height };
+        if (_geometry.window != nullptr)
+        {
+            _geometry.source_rect = { 0, 0, width, height };
+            return;
+        }
+
+        RECT frame_bounds{ 0, 0, width, height };
+        IntersectRect(&_geometry.source_rect, &_geometry.source_rect, &frame_bounds);
+        if (_geometry.source_rect.right <= _geometry.source_rect.left ||
+            _geometry.source_rect.bottom <= _geometry.source_rect.top)
+        {
+            _geometry.source_rect = frame_bounds;
+        }
     }
 
     void wgc_capture_backend::on_frame_arrived(
@@ -218,6 +324,10 @@
                         static_cast<int32_t>(wgc_frame_queue_limit),
                         content_size);
                     _geometry = *updated_geometry;
+                    normalize_geometry_for_frame_size(content_size.Width, content_size.Height);
+                    _pending_resize_geometry = _geometry;
+                    _resize_pending = true;
+                    _frame_arrived_condition.notify_all();
                 }
                 catch (const winrt::hresult_error& recreate_error)
                 {
@@ -225,7 +335,6 @@
                     return;
                 }
 
-                fail_locked(MF_E_TRANSFORM_STREAM_CHANGE, capture_fallback_reason::stream_change);
                 return;
             }
 
@@ -337,7 +446,13 @@
         result = resource.As(&source_texture);
         if (SUCCEEDED(result))
         {
-            _d3d.context->CopyResource(destination, source_texture.Get());
+            result = copy_texture_to_destination(_d3d, destination, source_texture.Get(), _copy_mismatch_reason);
+            if (FAILED(result))
+            {
+                (void)_duplication->ReleaseFrame();
+                return result;
+            }
+
             copied_frame.source_rect = _geometry.source_rect;
             copied_frame.captured_at_qpc = qpc_now();
         }
@@ -354,4 +469,17 @@
     const char* dxgi_duplication_capture_backend::backend_name() const noexcept
     {
         return "dxgi-desktop-duplication";
+    }
+
+    bool dxgi_duplication_capture_backend::current_geometry(resolved_capture_geometry& geometry) const
+    {
+        geometry = _geometry;
+        return rect_has_area(_geometry.capture_item_bounds);
+    }
+
+    std::string dxgi_duplication_capture_backend::consume_copy_mismatch_reason()
+    {
+        auto reason = std::move(_copy_mismatch_reason);
+        _copy_mismatch_reason.clear();
+        return reason;
     }

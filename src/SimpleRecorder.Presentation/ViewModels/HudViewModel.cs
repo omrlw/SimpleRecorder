@@ -63,9 +63,20 @@ public sealed class HudViewModel : ObservableObject
         _recorderController.StatusChanged += RecorderControllerOnStatusChanged;
 
         Microphones = new ObservableCollection<AudioInputDevice>();
-        FrameRateOptions = Enum.GetValues<FrameRateOption>();
-        ResolutionOptions = Enum.GetValues<ResolutionOption>();
-        QualityOptions = Enum.GetValues<QualityPreset>();
+        FrameRateOptions =
+        [
+            FrameRateOption.Fps24,
+            FrameRateOption.Fps30,
+            FrameRateOption.Fps60,
+            FrameRateOption.Monitor
+        ];
+        ResolutionOptions = BuildResolutionOptions();
+        QualityOptions =
+        [
+            QualityPreset.Quality,
+            QualityPreset.Balanced,
+            QualityPreset.Low
+        ];
         CountdownOptions = Enum.GetValues<CountdownOption>();
         EncoderPreferenceOptions = Enum.GetValues<EncoderPreference>();
 
@@ -96,7 +107,7 @@ public sealed class HudViewModel : ObservableObject
 
     public IReadOnlyList<FrameRateOption> FrameRateOptions { get; }
 
-    public IReadOnlyList<ResolutionOption> ResolutionOptions { get; }
+    public IReadOnlyList<ResolutionOptionItem> ResolutionOptions { get; private set; }
 
     public IReadOnlyList<QualityPreset> QualityOptions { get; }
 
@@ -272,10 +283,24 @@ public sealed class HudViewModel : ObservableObject
             }
 
             _settings.Resolution = value;
+            RefreshResolutionOptions();
             OnPropertyChanged();
             PersistSettings();
             RefreshSelectionStatusIfReady();
             RaiseWorkbenchDetailsChanged();
+        }
+    }
+
+    public ResolutionOptionItem SelectedResolutionOption
+    {
+        get => ResolutionOptions.FirstOrDefault(option => option.Value == _settings.Resolution)
+            ?? ResolutionOptions[0];
+        set
+        {
+            if (value is not null)
+            {
+                SelectedResolution = value.Value;
+            }
         }
     }
 
@@ -1056,6 +1081,7 @@ public sealed class HudViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedSourcePillLabel));
         OnPropertyChanged(nameof(SelectedFrameRate));
         OnPropertyChanged(nameof(SelectedResolution));
+        RefreshResolutionOptions();
         OnPropertyChanged(nameof(SelectedQuality));
         OnPropertyChanged(nameof(SelectedCountdown));
         OnPropertyChanged(nameof(SelectedEncoderPreference));
@@ -1153,6 +1179,7 @@ public sealed class HudViewModel : ObservableObject
         OnPropertyChanged(nameof(IsDisplaySelected));
         OnPropertyChanged(nameof(IsWindowSelected));
         OnPropertyChanged(nameof(IsRegionSelected));
+        RefreshResolutionOptions();
         RaiseSourceButtonVisualsChanged();
         RaiseWorkbenchDetailsChanged();
     }
@@ -1217,7 +1244,42 @@ public sealed class HudViewModel : ObservableObject
     private CaptureSourcePreview DescribeCurrentSelection() =>
         _captureSourcePicker.Describe(_selectedSource, _settings.ToRecordingOptions());
 
-    private static bool UsesPrecisePreview(CaptureSourceKind kind) => kind == CaptureSourceKind.Region;
+    private static bool UsesPrecisePreview(CaptureSourceKind kind) =>
+        kind is CaptureSourceKind.Display or CaptureSourceKind.Region;
+
+    private IReadOnlyList<ResolutionOptionItem> BuildResolutionOptions() =>
+    [
+        new(ResolutionOption.Auto, BuildAutoResolutionDisplayName()),
+        new(ResolutionOption.P480, "480p"),
+        new(ResolutionOption.P720, "720p"),
+        new(ResolutionOption.P1080, "1080p"),
+        new(ResolutionOption.P1440, "1440p"),
+        new(ResolutionOption.P2160, "4K")
+    ];
+
+    private void RefreshResolutionOptions()
+    {
+        ResolutionOptions = BuildResolutionOptions();
+        OnPropertyChanged(nameof(ResolutionOptions));
+        OnPropertyChanged(nameof(SelectedResolutionOption));
+    }
+
+    private string BuildAutoResolutionDisplayName()
+    {
+        try
+        {
+            var autoOptions = _settings.ToRecordingOptions() with { Resolution = ResolutionOption.Auto };
+            var preview = _captureSourcePicker.Describe(_selectedSource, autoOptions);
+            return FormatResolutionHeight(preview.OutputHeight);
+        }
+        catch
+        {
+            return "Auto";
+        }
+    }
+
+    private static string FormatResolutionHeight(int height) =>
+        height >= 2160 ? "4K" : $"{height}p";
 
     private static string BuildCaptureFallbackLabel(RecordingSessionTelemetry telemetry)
     {
@@ -1326,3 +1388,5 @@ public sealed class HudViewModel : ObservableObject
     private static SolidColorBrush CreateBrush(byte r, byte g, byte b, byte a = 255) =>
         new(Color.FromArgb(a, r, g, b));
 }
+
+public sealed record ResolutionOptionItem(ResolutionOption Value, string DisplayName);

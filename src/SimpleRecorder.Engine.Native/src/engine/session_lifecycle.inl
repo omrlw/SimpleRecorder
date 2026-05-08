@@ -150,6 +150,35 @@
             static_cast<double>(represented_duration_qpc);
     }
 
+    double compute_effective_frame_rate(const recording_metrics& metrics)
+    {
+        if (metrics.encoded_frames == 0 || metrics.represented_duration_qpc <= 0)
+        {
+            return 0.0;
+        }
+
+        return static_cast<double>(metrics.encoded_frames) * static_cast<double>(qpc_frequency()) /
+            static_cast<double>(metrics.represented_duration_qpc);
+    }
+
+    int64_t compute_wall_duration_qpc(const recording_session& session)
+    {
+        const auto completed_qpc = session.completed_qpc != 0 ? session.completed_qpc : qpc_now();
+        return std::max<int64_t>(completed_qpc - session.started_qpc, 0);
+    }
+
+    double compute_represented_to_wall_duration_ratio(const recording_session& session)
+    {
+        const auto wall_duration_qpc = compute_wall_duration_qpc(session);
+        if (wall_duration_qpc <= 0)
+        {
+            return 0.0;
+        }
+
+        return static_cast<double>(session.metrics.represented_duration_qpc) /
+            static_cast<double>(wall_duration_qpc);
+    }
+
     double compute_average_latency_millis(int64_t total_latency_qpc, uint64_t sample_count)
     {
         if (sample_count == 0)

@@ -22,10 +22,11 @@ The app is intentionally simple at the UI layer and technical in the engine. Use
 ## Recording Pipeline
 - Source: display, window, or physical virtual-desktop region.
 - Capture: prefer Windows Graphics Capture where it fits.
-- Fallback: use DXGI Desktop Duplication for supported desktop capture and GDI only for compatibility.
+- Fallback: use DXGI Desktop Duplication for supported desktop capture; use GDI only when no compatible hardware graphics adapter is detected.
 - Frame processing: crop, scale, normalize, and convert frames in D3D11 where possible.
-- Encode: write H.264 MP4 through Media Foundation, preferring hardware encode when it can be verified.
-- Metadata: write `.srrec/manifest.json` next to the MP4 for backend, encoder, color, output, and timing telemetry.
+- Encode: write H.264 MP4 through Media Foundation, requiring verified hardware encode whenever a real GPU/iGPU is present.
+- 120 FPS mode: `frame_rate = 0` targets `120` FPS, still records monitor refresh telemetry, respects stricter H.264 level limits, and writes a constant output cadence so MP4 metadata matches the selected target while repeated frames fill only missing capture slots.
+- Metadata: write `.srrec/manifest.json` next to the MP4 for backend, encoder, color, output, timing, GPU detection, CPU fallback blocking, and texture-copy integrity telemetry.
 
 ## Product Constraints
 - H.264 is the active product codec.

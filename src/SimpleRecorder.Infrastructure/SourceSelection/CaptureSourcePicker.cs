@@ -191,7 +191,7 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
             : null;
     }
 
-    private static IReadOnlyList<CaptureSourceDescriptor> GetDisplaySources()
+    internal static IReadOnlyList<CaptureSourceDescriptor> GetDisplaySources()
     {
         var displays = new List<DisplayEntry>();
         var callback = new EnumDisplayMonitorsProc((nint monitorHandle, nint deviceContext, ref Rect monitorRect, nint monitorData) =>
@@ -205,11 +205,12 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
                 return true;
             }
 
-            var bounds = new ScreenRegion(
+            var monitorBounds = new ScreenRegion(
                 info.Monitor.Left,
                 info.Monitor.Top,
                 info.Monitor.Right - info.Monitor.Left,
                 info.Monitor.Bottom - info.Monitor.Top);
+            var bounds = TryGetDisplayModeBounds(info.DeviceName) ?? monitorBounds;
 
             if (!bounds.MeetsMinimumSize)
             {
@@ -314,6 +315,28 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
             DisplayId: entry.DeviceName,
             RememberToken: EncodeOpaquePayload("display:", entry.DeviceName),
             Bounds: entry.Bounds);
+    }
+
+    private static ScreenRegion? TryGetDisplayModeBounds(string deviceName)
+    {
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            return null;
+        }
+
+        var mode = DevMode.Create();
+        if (!EnumDisplaySettings(deviceName, EnumCurrentSettings, ref mode) ||
+            mode.PelsWidth < ScreenRegion.MinimumDimension ||
+            mode.PelsHeight < ScreenRegion.MinimumDimension)
+        {
+            return null;
+        }
+
+        return new ScreenRegion(
+            mode.PositionX,
+            mode.PositionY,
+            mode.PelsWidth,
+            mode.PelsHeight);
     }
 
     private static CaptureSourceDescriptor CreateWindowSource(WindowEntry entry)
@@ -421,6 +444,7 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
     private delegate bool EnumDisplayMonitorsProc(nint monitorHandle, nint hdc, ref Rect monitorRect, nint lParam);
 
     private const int MonitorInfoPrimaryFlag = 0x00000001;
+    private const int EnumCurrentSettings = -1;
     private const int GwlExStyle = -20;
     private const long WsExToolWindow = 0x00000080L;
 
@@ -436,6 +460,9 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(nint hMonitor, ref MonitorInfoEx lpmi);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool EnumDisplaySettings(string deviceName, int modeNumber, ref DevMode devMode);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(nint hWnd);
@@ -494,16 +521,60 @@ public sealed class CaptureSourcePicker : ICaptureSourcePicker
                 DeviceName = string.Empty
             };
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DevMode
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        public short SpecVersion;
+        public short DriverVersion;
+        public short Size;
+        public short DriverExtra;
+        public int Fields;
+        public int PositionX;
+        public int PositionY;
+        public int DisplayOrientation;
+        public int DisplayFixedOutput;
+        public short Color;
+        public short Duplex;
+        public short YResolution;
+        public short TrueTypeOption;
+        public short Collate;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string FormName;
+        public short LogPixels;
+        public int BitsPerPel;
+        public int PelsWidth;
+        public int PelsHeight;
+        public int DisplayFlags;
+        public int DisplayFrequency;
+        public int IcmMethod;
+        public int IcmIntent;
+        public int MediaType;
+        public int DitherType;
+        public int Reserved1;
+        public int Reserved2;
+        public int PanningWidth;
+        public int PanningHeight;
+
+        public static DevMode Create() =>
+            new()
+            {
+                Size = (short)Marshal.SizeOf<DevMode>(),
+                DeviceName = string.Empty,
+                FormName = string.Empty
+            };
+    }
 }
 
 internal static class CaptureSourcePreviewCalculator
 {
+    private const int MaximumAutoOutputHeight = 2160;
+
     internal static ScreenRegion VirtualDesktopBounds =>
-        new(
-            GetSystemMetrics(SystemMetricVirtualScreenX),
-            GetSystemMetrics(SystemMetricVirtualScreenY),
-            GetSystemMetrics(SystemMetricVirtualScreenWidth),
-            GetSystemMetrics(SystemMetricVirtualScreenHeight));
+        ResolveVirtualDesktopBounds();
 
     internal static CaptureSourcePreview Describe(CaptureSourceDescriptor source, RecordingOptions options)
     {
@@ -521,12 +592,7 @@ internal static class CaptureSourcePreviewCalculator
         var sourceWidth = effectiveRegion.Width;
         var sourceHeight = effectiveRegion.Height;
 
-        var rawTargetHeight = options.Resolution switch
-        {
-            ResolutionOption.P720 => Math.Min(sourceHeight, 720),
-            ResolutionOption.P1080 => Math.Min(sourceHeight, 1080),
-            _ => sourceHeight
-        };
+        var rawTargetHeight = ResolveTargetHeight(options.Resolution, sourceHeight);
 
         var normalizedTargetHeight = NormalizeEvenDimension(rawTargetHeight);
         var rawTargetWidth = Math.Max(
@@ -571,6 +637,49 @@ internal static class CaptureSourcePreviewCalculator
         }
 
         return value % 2 == 0 ? value : value - 1;
+    }
+
+    private static int ResolveTargetHeight(ResolutionOption resolution, int sourceHeight)
+    {
+        var maximumHeight = resolution switch
+        {
+            ResolutionOption.P480 => 480,
+            ResolutionOption.P720 => 720,
+            ResolutionOption.P1080 => 1080,
+            ResolutionOption.P1440 => 1440,
+            ResolutionOption.P2160 => MaximumAutoOutputHeight,
+            _ => MaximumAutoOutputHeight
+        };
+
+        return Math.Min(sourceHeight, maximumHeight);
+    }
+
+    private static ScreenRegion ResolveVirtualDesktopBounds()
+    {
+        var displays = CaptureSourcePicker.GetDisplaySources();
+        ScreenRegion? combined = null;
+
+        foreach (var display in displays)
+        {
+            if (display.Bounds is null || !display.Bounds.MeetsMinimumSize)
+            {
+                continue;
+            }
+
+            combined = combined is null
+                ? display.Bounds
+                : ScreenRegion.FromEdges(
+                    Math.Min(combined.X, display.Bounds.X),
+                    Math.Min(combined.Y, display.Bounds.Y),
+                    Math.Max(combined.Right, display.Bounds.Right),
+                    Math.Max(combined.Bottom, display.Bounds.Bottom));
+        }
+
+        return combined ?? new ScreenRegion(
+            GetSystemMetrics(SystemMetricVirtualScreenX),
+            GetSystemMetrics(SystemMetricVirtualScreenY),
+            GetSystemMetrics(SystemMetricVirtualScreenWidth),
+            GetSystemMetrics(SystemMetricVirtualScreenHeight));
     }
 
     private const int SystemMetricVirtualScreenX = 76;

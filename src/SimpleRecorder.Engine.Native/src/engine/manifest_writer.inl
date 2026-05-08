@@ -8,10 +8,11 @@
         const auto final_video_name_utf8 = session.final_output_path.filename().u8string();
         const auto final_video_name = std::string(final_video_name_utf8.begin(), final_video_name_utf8.end());
         const auto dropped_frame_count = session.metrics.backpressure_drop_count + session.metrics.capture_failure_count;
+        const auto wall_duration_qpc = compute_wall_duration_qpc(session);
 
         json << std::fixed << std::setprecision(2);
         json << "{\n";
-        json << "  \"schemaVersion\": 7,\n";
+        json << "  \"schemaVersion\": 9,\n";
         json << "  \"artifactType\": \"streaming-mp4-session\",\n";
         json << "  \"requestedCaptureBackend\": \"" << escape_json(session.requested_capture_backend) << "\",\n";
         json << "  \"captureBackend\": \"" << escape_json(session.capture_backend) << "\",\n";
@@ -55,12 +56,14 @@
         json << "  \"videoCodec\": \"" << escape_json(session.encoder_codec) << "\",\n";
         json << "  \"encoderPixelFormat\": \"" << escape_json(session.encoder_pixel_format) << "\",\n";
         json << "  \"qualityPresetName\": \"" << escape_json(session.quality_config.quality_preset_name) << "\",\n";
+        json << "  \"qualityPolicyVersion\": " << session.quality_config.quality_policy_version << ",\n";
         json << "  \"targetBitrateBps\": " << session.quality_config.target_bitrate_bps << ",\n";
         json << "  \"maxBitrateBps\": " << session.quality_config.max_bitrate_bps << ",\n";
         json << "  \"rateControlMode\": \"" << escape_json(session.quality_config.rate_control_mode) << "\",\n";
         json << "  \"qualityVsSpeed\": " << session.quality_config.quality_vs_speed << ",\n";
         json << "  \"gopSize\": " << session.quality_config.gop_size << ",\n";
         json << "  \"cabacRequested\": " << (session.quality_config.cabac_requested ? "true" : "false") << ",\n";
+        json << "  \"encoderLowLatency\": " << (session.quality_config.low_latency_requested ? "true" : "false") << ",\n";
         json << "  \"encoderConfigStatus\": \"" << escape_json(session.encoder_config_status) << "\",\n";
         json << "  \"colorPrimaries\": \"BT.709\",\n";
         json << "  \"transferFunction\": \"BT.709\",\n";
@@ -68,12 +71,50 @@
         json << "  \"nominalRange\": \"16-235\",\n";
         json << "  \"d3dInputColorSpace\": \"RGB full-range BT.709/sRGB\",\n";
         json << "  \"d3dOutputColorSpace\": \"YCbCr BT.709 limited-range\",\n";
+        json << "  \"videoProcessorUsage\": \"" << escape_json(session.video_processor_usage) << "\",\n";
+        json << "  \"edgeEnhancementRequested\": " << (session.quality_config.edge_enhancement_requested ? "true" : "false") << ",\n";
+        json << "  \"edgeEnhancementApplied\": " << (session.edge_enhancement_applied ? "true" : "false") << ",\n";
         json << "  \"gpuPipelineMode\": \"" << (session.mode == pipeline_mode::gpu_first ? "gpu-first" : "legacy-gdi") << "\",\n";
         json << "  \"captureSlotCount\": " << capture_slot_count << ",\n";
         json << "  \"captureQueueLimit\": " << wgc_frame_queue_limit << ",\n";
         json << "  \"d3dMultithreadProtected\": " << (session.d3d_multithread_protected ? "true" : "false") << ",\n";
+        json << "  \"gpuHardwareDetected\": " << (session.gpu_hardware_detected ? "true" : "false") << ",\n";
+        json << "  \"cpuFallbackAllowed\": " << (session.cpu_fallback_allowed ? "true" : "false") << ",\n";
+        json << "  \"cpuFallbackBlocked\": " << (session.cpu_fallback_blocked ? "true" : "false") << ",\n";
+        json << "  \"cpuFallbackBlockReason\": \"" << escape_json(session.cpu_fallback_block_reason) << "\",\n";
+        json << "  \"gpuInitializationHresult\": ";
+        if (SUCCEEDED(session.gpu_initialization_hresult))
+        {
+            json << "null,\n";
+        }
+        else
+        {
+            json << "\"" << format_hresult(session.gpu_initialization_hresult) << "\",\n";
+        }
+        json << "  \"copyIntegrityStatus\": \"" << escape_json(session.copy_integrity_status) << "\",\n";
+        json << "  \"copyDimensionMismatchCount\": " << session.copy_dimension_mismatch_count << ",\n";
+        json << "  \"copyIntegrityFailureReason\": ";
+        if (session.copy_integrity_failure_reason.empty())
+        {
+            json << "null,\n";
+        }
+        else
+        {
+            json << "\"" << escape_json(session.copy_integrity_failure_reason) << "\",\n";
+        }
         json << "  \"wgcStartupAttempted\": " << (session.wgc_startup_attempted ? "true" : "false") << ",\n";
         json << "  \"wgcFirstFrameLatencyMs\": " << qpc_to_millis(session.wgc_first_frame_latency_qpc) << ",\n";
+        json << "  \"wgcResizeCount\": " << session.wgc_resize_count << ",\n";
+        json << "  \"wgcResizeStatus\": \"" << escape_json(session.wgc_resize_status) << "\",\n";
+        json << "  \"wgcResizeFailureReason\": ";
+        if (session.wgc_resize_failure_reason.empty())
+        {
+            json << "null,\n";
+        }
+        else
+        {
+            json << "\"" << escape_json(session.wgc_resize_failure_reason) << "\",\n";
+        }
         if (!session.adapter_name.empty())
         {
             json << "  \"adapterName\": \"" << escape_json(narrow_utf8(session.adapter_name)) << "\",\n";
@@ -81,7 +122,14 @@
         json << "  \"fileOutputMode\": \"live-mp4\",\n";
         json << "  \"sourceKind\": \"" << source_kind_name(session.source.kind) << "\",\n";
         json << "  \"requestedFrameRate\": " << session.options.frame_rate << ",\n";
+        json << "  \"isMonitorFrameRateMode\": " << (session.options.frame_rate == monitor_frame_rate_option ? "true" : "false") << ",\n";
+        json << "  \"monitorFrameRateLimit\": " << product_monitor_frame_rate_limit << ",\n";
         json << "  \"targetFrameRate\": " << session.target_frame_rate << ",\n";
+        json << "  \"effectiveFrameRate\": " << compute_effective_frame_rate(session.metrics) << ",\n";
+        json << "  \"monitorRefreshRate\": " << session.monitor_refresh_rate << ",\n";
+        json << "  \"wasMonitorFrameRateCapped\": " << (session.options.frame_rate == monitor_frame_rate_option && session.monitor_refresh_rate > session.target_frame_rate ? "true" : "false") << ",\n";
+        json << "  \"frameRatePolicy\": \"constant-output-cadence-max-120\",\n";
+        json << "  \"fpsCapReason\": \"" << escape_json(session.fps_cap_reason) << "\",\n";
         json << "  \"requestedResolution\": " << session.options.resolution << ",\n";
         json << "  \"outputWidth\": " << session.metrics.output_width << ",\n";
         json << "  \"outputHeight\": " << session.metrics.output_height << ",\n";
@@ -89,6 +137,9 @@
         json << "  \"includeMicrophone\": " << (session.options.include_microphone != 0 ? "true" : "false") << ",\n";
         json << "  \"startedAtUnixMillis\": " << session.started_at_unix_millis << ",\n";
         json << "  \"completedAtUnixMillis\": " << unix_time_millis() << ",\n";
+        json << "  \"wallDurationMs\": " << qpc_to_millis(wall_duration_qpc) << ",\n";
+        json << "  \"representedDurationMs\": " << qpc_to_millis(session.metrics.represented_duration_qpc) << ",\n";
+        json << "  \"representedToWallDurationRatio\": " << compute_represented_to_wall_duration_ratio(session) << ",\n";
         json << "  \"finalVideoFile\": \"" << escape_json(final_video_name) << "\",\n";
         json << "  \"finalVideoContainer\": \"mp4\",\n";
         json << "  \"finalVideoCodec\": \"h264\",\n";
@@ -97,6 +148,7 @@
         json << "  \"capturedFrameCount\": " << session.metrics.captured_frames << ",\n";
         json << "  \"encodedFrameCount\": " << session.metrics.encoded_frames << ",\n";
         json << "  \"droppedFrameCount\": " << dropped_frame_count << ",\n";
+        json << "  \"duplicatedFrameCount\": " << session.metrics.duplicated_frame_count << ",\n";
         json << "  \"backpressureDropCount\": " << session.metrics.backpressure_drop_count << ",\n";
         json << "  \"captureFailureCount\": " << session.metrics.capture_failure_count << ",\n";
         json << "  \"pacingOverrunCount\": " << session.metrics.pacing_overrun_count << ",\n";

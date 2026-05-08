@@ -7,11 +7,25 @@
         const auto geometry = resolve_capture_geometry(session.source);
         if (!geometry.has_value() || geometry->spans_multiple_monitors)
         {
+            session.gpu_hardware_detected = detect_hardware_graphics_adapter();
+            session.cpu_fallback_blocked = session.gpu_hardware_detected;
+            session.cpu_fallback_block_reason = session.gpu_hardware_detected
+                ? "gpu-detected-but-source-geometry-is-not-gpu-compatible"
+                : "no-hardware-gpu-detected";
+            session.gpu_initialization_hresult = E_INVALIDARG;
+            session.encoder_selection_reason = session.cpu_fallback_block_reason;
             return false;
         }
 
         if (session.source.kind == sr_capture_source_window && geometry->window == nullptr)
         {
+            session.gpu_hardware_detected = detect_hardware_graphics_adapter();
+            session.cpu_fallback_blocked = session.gpu_hardware_detected;
+            session.cpu_fallback_block_reason = session.gpu_hardware_detected
+                ? "gpu-detected-but-window-handle-is-unavailable"
+                : "no-hardware-gpu-detected";
+            session.gpu_initialization_hresult = E_INVALIDARG;
+            session.encoder_selection_reason = session.cpu_fallback_block_reason;
             return false;
         }
 
@@ -36,6 +50,9 @@
         session.capture_fallback_hresult = S_OK;
         session.capture_fallback_from.clear();
         session.capture_fallback_to.clear();
+        session.cpu_fallback_allowed = false;
+        session.cpu_fallback_blocked = false;
+        session.cpu_fallback_block_reason = "none";
 
         if (session.options.encoder_preference == sr_encoder_preference_hardware_only)
         {
@@ -60,9 +77,17 @@
         }
 
         session.gpu_d3d = std::make_unique<d3d_context>();
-        if (FAILED(create_d3d_context(session.capture_monitor, *session.gpu_d3d)))
+        const auto d3d_result = create_d3d_context(session.capture_monitor, *session.gpu_d3d);
+        session.gpu_hardware_detected = session.gpu_d3d->hardware_adapter_detected;
+        session.gpu_initialization_hresult = d3d_result;
+        if (FAILED(d3d_result))
         {
             session.gpu_d3d.reset();
+            session.cpu_fallback_blocked = session.gpu_hardware_detected;
+            session.cpu_fallback_block_reason = session.gpu_hardware_detected
+                ? "gpu-detected-but-d3d11-video-initialization-failed"
+                : "no-hardware-gpu-detected";
+            session.encoder_selection_reason = session.cpu_fallback_block_reason;
             return false;
         }
 
@@ -95,6 +120,9 @@
         session.capture_fallback_hresult = S_OK;
         session.capture_fallback_from.clear();
         session.capture_fallback_to.clear();
+        session.cpu_fallback_allowed = true;
+        session.cpu_fallback_blocked = false;
+        session.cpu_fallback_block_reason = "no-hardware-gpu-detected";
 
         auto geometry = resolve_capture_geometry(session.source);
         if (!geometry.has_value())

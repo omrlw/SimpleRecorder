@@ -125,6 +125,16 @@
         }
 
         session->capture_backend = backend->backend_name();
+        resolved_capture_geometry active_backend_geometry{};
+        if (backend->current_geometry(active_backend_geometry))
+        {
+            geometry = active_backend_geometry;
+            session->capture_item_rect = geometry->capture_item_bounds;
+            session->capture_crop_rect = geometry->source_rect;
+            session->capture_monitor = geometry->monitor;
+            session->capture_window = geometry->window;
+        }
+
         if (backend->has_received_first_frame())
         {
             session->wgc_first_frame_latency_qpc = std::max<int64_t>(backend->first_frame_arrived_qpc() - session->started_qpc, 0);
@@ -132,7 +142,17 @@
 
         try
         {
-            frame_graph graph(*d3d, session->gpu_slots, geometry->capture_item_bounds, session->output_width, session->output_height, session->target_frame_rate);
+            frame_graph graph(
+                *d3d,
+                session->gpu_slots,
+                geometry->capture_item_bounds,
+                session->output_width,
+                session->output_height,
+                session->target_frame_rate,
+                session->quality_config.prefer_quality_video_processing,
+                session->quality_config.edge_enhancement_requested);
+            session->video_processor_usage = graph.video_processor_usage();
+            session->edge_enhancement_applied = graph.edge_enhancement_applied();
 
             bool can_capture = false;
             {
@@ -211,6 +231,72 @@
                     next_capture_deadline += static_cast<int64_t>(skipped_periods) * target_period_qpc;
                 }
 
+                resolved_capture_geometry resized_geometry{};
+                if (backend->consume_resize(resized_geometry))
+                {
+                    {
+                        std::scoped_lock lock(session->gate);
+                        ++session->wgc_resize_count;
+                        session->wgc_resize_status = "recreate-reported";
+                    }
+
+                    bool can_rebuild = false;
+                    while (true)
+                    {
+                        {
+                            std::scoped_lock lock(session->gate);
+                            should_stop = session->stop_requested || FAILED(session->failure);
+                            can_rebuild = session->ready_slots.empty();
+                        }
+
+                        if (should_stop || can_rebuild)
+                        {
+                            break;
+                        }
+
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    }
+
+                    if (!can_rebuild)
+                    {
+                        break;
+                    }
+
+                    const auto rebuild_result = graph.recreate_for_capture_item_rect(resized_geometry.capture_item_bounds);
+                    if (FAILED(rebuild_result))
+                    {
+                        record_capture_backend_failure(
+                            *session,
+                            backend->backend_name(),
+                            capture_fallback_reason::stream_change,
+                            rebuild_result);
+                        {
+                            std::scoped_lock lock(session->gate);
+                            session->wgc_resize_status = "frame-graph-rebuild-failed";
+                            session->wgc_resize_failure_reason = format_hresult(rebuild_result);
+                            ++session->metrics.capture_failure_count;
+                        }
+
+                        fail_session(*session, rebuild_result, L"WGC resize was reported but the GPU frame graph could not be rebuilt.");
+                        break;
+                    }
+
+                    geometry = resized_geometry;
+                    session->capture_item_rect = resized_geometry.capture_item_bounds;
+                    session->capture_crop_rect = resized_geometry.source_rect;
+                    session->capture_monitor = resized_geometry.monitor;
+                    session->capture_window = resized_geometry.window;
+                    session->video_processor_usage = graph.video_processor_usage();
+                    session->edge_enhancement_applied = graph.edge_enhancement_applied();
+                    {
+                        std::scoped_lock lock(session->gate);
+                        session->wgc_resize_status = "continued-after-frame-graph-rebuild";
+                    }
+
+                    next_capture_deadline += target_period_qpc;
+                    continue;
+                }
+
                 size_t slot_index = 0;
                 {
                     std::scoped_lock lock(session->gate);
@@ -235,6 +321,13 @@
                 {
                     std::scoped_lock lock(session->gate);
                     session->metrics.backpressure_drop_count += backend->consume_backpressure_drops();
+                    const auto copy_mismatch_reason = backend->consume_copy_mismatch_reason();
+                    if (!copy_mismatch_reason.empty())
+                    {
+                        ++session->copy_dimension_mismatch_count;
+                        session->copy_integrity_status = "texture-mismatch-observed";
+                        session->copy_integrity_failure_reason = copy_mismatch_reason;
+                    }
                 }
 
                 if (is_capture_timeout(result))
@@ -322,6 +415,16 @@
                     {
                         session->wgc_first_frame_latency_qpc =
                             std::max<int64_t>(backend->first_frame_arrived_qpc() - session->started_qpc, 0);
+                    }
+
+                    if (using_wgc && failure_reason == capture_fallback_reason::stream_change)
+                    {
+                        std::scoped_lock lock(session->gate);
+                        ++session->wgc_resize_count;
+                        session->wgc_resize_status = can_fallback
+                            ? "resize-failed-falling-back"
+                            : "resize-failed-no-fallback";
+                        session->wgc_resize_failure_reason = format_hresult(result);
                     }
 
                     if (can_fallback)

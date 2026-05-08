@@ -30,6 +30,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -51,9 +52,14 @@ namespace
     using system_clock = std::chrono::system_clock;
 
     constexpr size_t capture_slot_count = 6;
+    constexpr size_t encode_snapshot_pool_multiplier = 4;
+    constexpr size_t encode_snapshot_pool_minimum = 24;
     constexpr size_t wgc_frame_queue_limit = 3;
-    constexpr int32_t max_supported_frame_rate = 120;
+    constexpr int32_t monitor_frame_rate_option = 0;
+    constexpr int32_t product_monitor_frame_rate_limit = 120;
+    constexpr int32_t h264_level_52_macroblocks_per_second = 2'073'600;
     constexpr int32_t minimum_dimension = 2;
+    constexpr int32_t maximum_auto_output_height = 2160;
     constexpr HRESULT capture_timeout = HRESULT_FROM_WIN32(WAIT_TIMEOUT);
     constexpr int32_t wgc_startup_warmup_millis = 1500;
 
@@ -74,6 +80,7 @@ namespace
 
     const char* capture_fallback_reason_name(capture_fallback_reason reason) noexcept;
     bool can_fallback_to_dxgi(int32_t source_kind) noexcept;
+    bool detect_hardware_graphics_adapter() noexcept;
     std::string narrow_utf8(const std::wstring& value);
     std::string format_hresult(HRESULT value);
     void record_capture_fallback(
@@ -122,6 +129,14 @@ namespace
         uint64_t sequence = 0;
     };
 
+    struct encode_snapshot_slot
+    {
+        ComPtr<ID3D11Texture2D> texture;
+        ComPtr<IMFMediaBuffer> sample_buffer;
+        ComPtr<IMFSample> sample;
+        DWORD sample_buffer_length = 0;
+    };
+
     struct recording_metrics
     {
         uint64_t capture_attempts = 0;
@@ -129,7 +144,9 @@ namespace
         uint64_t encoded_frames = 0;
         uint64_t backpressure_drop_count = 0;
         uint64_t capture_failure_count = 0;
+        uint64_t duplicated_frame_count = 0;
         uint64_t pacing_overrun_count = 0;
+        int64_t represented_duration_qpc = 0;
         uint32_t peak_queue_depth = 0;
         int64_t total_capture_latency_qpc = 0;
         int64_t total_queue_latency_qpc = 0;
@@ -148,8 +165,12 @@ namespace
         uint32_t max_bitrate_bps = 16'000'000;
         uint32_t quality_vs_speed = 65;
         uint32_t gop_size = 60;
+        uint32_t quality_policy_version = 2;
         bool cabac_requested = true;
         bool use_b_frames = false;
+        bool low_latency_requested = false;
+        bool prefer_quality_video_processing = true;
+        bool edge_enhancement_requested = true;
         const char* quality_preset_name = "Balanced";
         const char* rate_control_mode = "PeakConstrainedVBR";
     };
@@ -174,10 +195,13 @@ namespace
         sr_capture_source source{ sr_struct_version, sr_capture_source_display, 0, { 0, 0, 0, 0 } };
         sr_recording_options options{ sr_struct_version, 30, 0, 0, 0, 1, 0, sr_encoder_preference_auto, sr_video_codec_h264 };
         int32_t target_frame_rate = 30;
+        int32_t monitor_refresh_rate = 0;
+        std::string fps_cap_reason = "none";
         int32_t output_width = 0;
         int32_t output_height = 0;
         int64_t started_at_unix_millis = 0;
         int64_t started_qpc = 0;
+        int64_t completed_qpc = 0;
         uint64_t next_sequence = 0;
 
         std::string capture_backend = "gdi-live";
@@ -199,8 +223,21 @@ namespace
         std::string adapter_luid;
         encoder_quality_config quality_config;
         std::string encoder_config_status = "not-configured";
+        std::string video_processor_usage = "not-used";
+        bool edge_enhancement_applied = false;
         bool d3d_multithread_protected = false;
+        bool gpu_hardware_detected = false;
+        bool cpu_fallback_allowed = false;
+        bool cpu_fallback_blocked = false;
+        std::string cpu_fallback_block_reason = "none";
+        HRESULT gpu_initialization_hresult = S_OK;
+        std::string copy_integrity_status = "not-observed";
+        std::string copy_integrity_failure_reason;
+        uint64_t copy_dimension_mismatch_count = 0;
         bool wgc_startup_attempted = false;
+        uint64_t wgc_resize_count = 0;
+        std::string wgc_resize_status = "not-observed";
+        std::string wgc_resize_failure_reason;
         std::wstring adapter_name;
         int64_t wgc_first_frame_latency_qpc = 0;
 
@@ -280,6 +317,7 @@ namespace
         ComPtr<IMFDXGIDeviceManager> dxgi_device_manager;
         UINT dxgi_reset_token = 0;
         bool multithread_protected = false;
+        bool hardware_adapter_detected = false;
         std::wstring adapter_name;
         LUID adapter_luid{};
     };
@@ -306,6 +344,9 @@ namespace
         virtual capture_fallback_reason last_failure_reason() const noexcept { return capture_fallback_reason::none; }
         virtual bool has_received_first_frame() const noexcept { return false; }
         virtual int64_t first_frame_arrived_qpc() const noexcept { return 0; }
+        virtual bool consume_resize(resolved_capture_geometry&) { return false; }
+        virtual bool current_geometry(resolved_capture_geometry&) const { return false; }
+        virtual std::string consume_copy_mismatch_reason() { return {}; }
     };
 
     class frame_graph
@@ -317,11 +358,20 @@ namespace
             const RECT& capture_item_rect,
             int32_t output_width,
             int32_t output_height,
-            int32_t target_frame_rate);
+            int32_t target_frame_rate,
+            bool prefer_quality_video_processing,
+            bool edge_enhancement_requested);
 
         void process_slot(gpu_capture_slot& slot, const RECT& source_rect);
+        HRESULT recreate_for_capture_item_rect(const RECT& capture_item_rect) noexcept;
+        const std::string& video_processor_usage() const noexcept;
+        bool edge_enhancement_applied() const noexcept;
 
     private:
+        HRESULT create_video_processor(
+            const D3D11_VIDEO_PROCESSOR_CONTENT_DESC& content_desc,
+            D3D11_VIDEO_USAGE usage);
+        bool try_enable_edge_enhancement();
         void create_slots(UINT input_width, UINT input_height);
 
         d3d_context& _d3d;
@@ -329,6 +379,10 @@ namespace
         RECT _capture_item_rect{ 0, 0, 0, 0 };
         int32_t _output_width = 0;
         int32_t _output_height = 0;
+        int32_t _target_frame_rate = 30;
+        std::string _video_processor_usage = "playback-normal";
+        bool _edge_enhancement_requested = false;
+        bool _edge_enhancement_applied = false;
         ComPtr<ID3D11VideoProcessorEnumerator> _enumerator;
         ComPtr<ID3D11VideoProcessor> _processor;
     };
@@ -348,6 +402,8 @@ namespace
 
     private:
         void initialize_sink_writer();
+        void prepare_encode_snapshot_pool(const D3D11_TEXTURE2D_DESC& texture_desc);
+        encode_snapshot_slot& next_encode_snapshot();
         HRESULT create_sink_writer(
             bool enable_d3d_manager,
             bool disable_converters,
@@ -360,6 +416,8 @@ namespace
         DWORD _stream_index = 0;
         bool _hardware_encode = false;
         std::wstring _last_stage;
+        std::vector<encode_snapshot_slot> _encode_snapshots;
+        size_t _next_encode_snapshot = 0;
     };
 
     class wgc_capture_backend final : public capture_backend
@@ -376,6 +434,9 @@ namespace
         capture_fallback_reason last_failure_reason() const noexcept override;
         bool has_received_first_frame() const noexcept override;
         int64_t first_frame_arrived_qpc() const noexcept override;
+        bool consume_resize(resolved_capture_geometry& geometry) override;
+        bool current_geometry(resolved_capture_geometry& geometry) const override;
+        std::string consume_copy_mismatch_reason() override;
 
     private:
         struct queued_frame
@@ -385,6 +446,7 @@ namespace
         };
 
         void fail_locked(HRESULT failure, capture_fallback_reason reason) noexcept;
+        void normalize_geometry_for_frame_size(int32_t width, int32_t height) noexcept;
         void on_frame_arrived(
             winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender,
             winrt::Windows::Foundation::IInspectable const&);
@@ -400,6 +462,9 @@ namespace
         capture_fallback_reason _failure_reason = capture_fallback_reason::none;
         bool _stopped = false;
         bool _has_received_first_frame = false;
+        bool _resize_pending = false;
+        resolved_capture_geometry _pending_resize_geometry{};
+        std::string _copy_mismatch_reason;
         int64_t _first_frame_arrived_qpc = 0;
         int64_t _startup_deadline_qpc = 0;
 
@@ -419,10 +484,13 @@ namespace
         HRESULT copy_next_frame_to(ID3D11Texture2D* destination, copied_capture_frame& copied_frame) override;
         void stop() override;
         const char* backend_name() const noexcept override;
+        bool current_geometry(resolved_capture_geometry& geometry) const override;
+        std::string consume_copy_mismatch_reason() override;
 
     private:
         d3d_context& _d3d;
         resolved_capture_geometry _geometry;
+        std::string _copy_mismatch_reason;
         ComPtr<IDXGIOutputDuplication> _duplication;
     };
 
@@ -481,6 +549,13 @@ namespace
     int64_t frame_duration_qpc(int32_t frame_rate)
     {
         return std::max<int64_t>(qpc_frequency() / std::max(frame_rate, 1), 1);
+    }
+
+    bool requires_hardware_encode(const recording_session& session) noexcept
+    {
+        return session.options.encoder_preference != sr_encoder_preference_software_fallback &&
+            session.options.frame_rate == monitor_frame_rate_option &&
+            session.target_frame_rate > 60;
     }
 
     bool is_recording_state(sr_recorder_state state)
@@ -567,12 +642,16 @@ namespace
 
     int32_t resolve_target_height(const sr_recording_options& options, int32_t source_height)
     {
-        if (options.resolution == 720 || options.resolution == 1080)
+        if (options.resolution == 480 ||
+            options.resolution == 720 ||
+            options.resolution == 1080 ||
+            options.resolution == 1440 ||
+            options.resolution == 2160)
         {
             return normalize_even_dimension(std::min(source_height, options.resolution));
         }
 
-        return normalize_even_dimension(source_height);
+        return normalize_even_dimension(std::min(source_height, maximum_auto_output_height));
     }
 
     int32_t resolve_target_width(int32_t source_width, int32_t source_height, int32_t target_height)
@@ -749,42 +828,129 @@ namespace
         switch (options.quality_preset)
         {
         case 1:
-            return "Sharp";
+            return "Quality";
         case 2:
-            return "SmallFile";
+            return "Low";
         default:
             return "Balanced";
         }
     }
 
-    encoder_quality_config resolve_encoder_quality_config(const sr_recording_options& options, int32_t target_frame_rate)
+    double resolve_screen_bitrate_scale(int32_t output_width, int32_t output_height) noexcept
+    {
+        constexpr double reference_pixels = 1920.0 * 1080.0;
+        const auto output_pixels = static_cast<double>(std::max(output_width, minimum_dimension)) *
+            static_cast<double>(std::max(output_height, minimum_dimension));
+        const auto pixel_ratio = output_pixels / reference_pixels;
+
+        return std::clamp(std::pow(std::max(pixel_ratio, 0.01), 0.65), 0.45, 4.0);
+    }
+
+    encoder_quality_config resolve_encoder_quality_config(
+        const sr_recording_options& options,
+        int32_t target_frame_rate,
+        int32_t output_width,
+        int32_t output_height)
     {
         auto bitrate_kbps = 10'000;
         auto max_bitrate_multiplier = 1.6;
         uint32_t quality_vs_speed = 65;
+        bool low_latency_requested = false;
+        bool prefer_quality_video_processing = true;
+        bool edge_enhancement_requested = true;
+        const auto requested_resolution = options.resolution;
 
         switch (options.quality_preset)
         {
         case 2:
-            bitrate_kbps = options.resolution == 720 ? 5'000 : 9'000;
+            if (requested_resolution == 480)
+            {
+                bitrate_kbps = 3'500;
+            }
+            else if (requested_resolution == 720)
+            {
+                bitrate_kbps = 5'000;
+            }
+            else if (requested_resolution == 1440)
+            {
+                bitrate_kbps = 16'000;
+            }
+            else if (requested_resolution == 2160)
+            {
+                bitrate_kbps = 28'000;
+            }
+            else
+            {
+                bitrate_kbps = 9'000;
+            }
             max_bitrate_multiplier = 1.3;
             quality_vs_speed = 50;
+            low_latency_requested = true;
+            prefer_quality_video_processing = false;
+            edge_enhancement_requested = false;
             break;
         case 1:
-            bitrate_kbps = options.resolution == 720 ? 12'000 : 22'000;
+            if (requested_resolution == 480)
+            {
+                bitrate_kbps = 7'500;
+            }
+            else if (requested_resolution == 720)
+            {
+                bitrate_kbps = 12'000;
+            }
+            else if (requested_resolution == 1440)
+            {
+                bitrate_kbps = 38'000;
+            }
+            else if (requested_resolution == 2160)
+            {
+                bitrate_kbps = 68'000;
+            }
+            else
+            {
+                bitrate_kbps = 22'000;
+            }
             quality_vs_speed = 75;
             break;
         default:
-            bitrate_kbps = options.resolution == 720 ? 9'000 : 16'000;
-            quality_vs_speed = 65;
+            if (requested_resolution == 480)
+            {
+                bitrate_kbps = 6'000;
+            }
+            else if (requested_resolution == 720)
+            {
+                bitrate_kbps = 10'000;
+            }
+            else if (requested_resolution == 1440)
+            {
+                bitrate_kbps = 30'000;
+            }
+            else if (requested_resolution == 2160)
+            {
+                bitrate_kbps = 52'000;
+            }
+            else
+            {
+                bitrate_kbps = 18'000;
+            }
+            max_bitrate_multiplier = 1.8;
+            quality_vs_speed = 72;
             break;
         }
 
-        if (target_frame_rate >= 120)
+        bitrate_kbps = static_cast<int32_t>(
+            std::lround(static_cast<double>(bitrate_kbps) * resolve_screen_bitrate_scale(output_width, output_height)));
+
+        if (target_frame_rate > 60)
         {
-            bitrate_kbps = static_cast<int32_t>(bitrate_kbps * 2.1);
+            bitrate_kbps = static_cast<int32_t>(
+                std::lround(static_cast<double>(bitrate_kbps) * (static_cast<double>(target_frame_rate) / 60.0) * 1.05));
+            quality_vs_speed = std::min<uint32_t>(quality_vs_speed, 58);
+            low_latency_requested = true;
+            prefer_quality_video_processing = false;
+            edge_enhancement_requested = false;
         }
-        else if (target_frame_rate >= 60)
+        else if (target_frame_rate == 60)
         {
             bitrate_kbps = static_cast<int32_t>(bitrate_kbps * 1.6);
         }
@@ -800,6 +966,9 @@ namespace
         config.gop_size = static_cast<uint32_t>(std::max(target_frame_rate, 1) * 2);
         config.cabac_requested = options.quality_preset != 2;
         config.use_b_frames = false;
+        config.low_latency_requested = low_latency_requested;
+        config.prefer_quality_video_processing = prefer_quality_video_processing;
+        config.edge_enhancement_requested = edge_enhancement_requested;
         config.quality_preset_name = resolve_quality_preset_name(options);
         return config;
     }
@@ -978,9 +1147,78 @@ namespace
         return attributes->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, static_cast<UINT32>(MFNominalRange_16_235));
     }
 
-    int32_t resolve_target_frame_rate(const sr_recording_options& options)
+    int32_t detect_monitor_refresh_rate(HMONITOR monitor) noexcept
     {
-        return std::clamp(std::max(options.frame_rate, 1), 1, max_supported_frame_rate);
+        if (monitor == nullptr)
+        {
+            return 0;
+        }
+
+        MONITORINFOEXW info{};
+        info.cbSize = sizeof(info);
+        if (!GetMonitorInfoW(monitor, &info) || info.szDevice[0] == L'\0')
+        {
+            return 0;
+        }
+
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (!EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode))
+        {
+            return 0;
+        }
+
+        return mode.dmDisplayFrequency > 1
+            ? static_cast<int32_t>(mode.dmDisplayFrequency)
+            : 0;
+    }
+
+    int32_t resolve_h264_level_frame_rate(int32_t width, int32_t height) noexcept
+    {
+        const auto macroblocks_wide = (std::max(width, 1) + 15) / 16;
+        const auto macroblocks_high = (std::max(height, 1) + 15) / 16;
+        const auto macroblocks_per_frame = std::max(macroblocks_wide * macroblocks_high, 1);
+        const auto h264_limit = std::max(h264_level_52_macroblocks_per_second / macroblocks_per_frame, 1);
+        return std::max(h264_limit, 1);
+    }
+
+    int32_t resolve_target_frame_rate(
+        const sr_recording_options& options,
+        int32_t output_width,
+        int32_t output_height,
+        HMONITOR monitor,
+        int32_t& monitor_refresh_rate,
+        std::string& cap_reason)
+    {
+        monitor_refresh_rate = detect_monitor_refresh_rate(monitor);
+        cap_reason = "none";
+
+        const auto h264_level_frame_rate = resolve_h264_level_frame_rate(output_width, output_height);
+        if (options.frame_rate == monitor_frame_rate_option)
+        {
+            auto target = product_monitor_frame_rate_limit;
+            if (target > h264_level_frame_rate)
+            {
+                target = h264_level_frame_rate;
+                cap_reason = "H264Limit";
+            }
+
+            return std::max(target, 1);
+        }
+
+        if (options.frame_rate == 24 || options.frame_rate == 30 || options.frame_rate == 60)
+        {
+            if (options.frame_rate > h264_level_frame_rate)
+            {
+                cap_reason = "H264Limit";
+                return h264_level_frame_rate;
+            }
+
+            return options.frame_rate;
+        }
+
+        cap_reason = "UnsupportedPreset";
+        return std::min(60, h264_level_frame_rate);
     }
 
     std::filesystem::path derive_final_video_path(const std::wstring& recording_path)
@@ -1158,10 +1396,20 @@ int32_t __stdcall sr_engine_start(sr_engine_handle engine, const sr_capture_sour
         session->encoder_fallback_reason = "requested-codec-not-implemented";
         session->encoder_codec = "h264";
     }
-    session->target_frame_rate = resolve_target_frame_rate(*options);
-    session->quality_config = resolve_encoder_quality_config(*options, session->target_frame_rate);
     session->output_height = resolve_target_height(*options, source_height);
     session->output_width = resolve_target_width(source_width, source_height, session->output_height);
+    session->target_frame_rate = resolve_target_frame_rate(
+        *options,
+        session->output_width,
+        session->output_height,
+        geometry->monitor,
+        session->monitor_refresh_rate,
+        session->fps_cap_reason);
+    session->quality_config = resolve_encoder_quality_config(
+        *options,
+        session->target_frame_rate,
+        session->output_width,
+        session->output_height);
     session->metrics.output_width = session->output_width;
     session->metrics.output_height = session->output_height;
     session->started_at_unix_millis = unix_time_millis();
@@ -1175,8 +1423,32 @@ int32_t __stdcall sr_engine_start(sr_engine_handle engine, const sr_capture_sour
     }
 
     const auto using_gpu_path = try_initialize_gpu_recording(*session);
+    if (!using_gpu_path && session->gpu_hardware_detected)
+    {
+        session->cpu_fallback_allowed = false;
+        session->cpu_fallback_blocked = true;
+        if (session->cpu_fallback_block_reason == "none")
+        {
+            session->cpu_fallback_block_reason = "gpu-detected-cpu-fallback-blocked";
+        }
+
+        fail_session(
+            *session,
+            FAILED(session->gpu_initialization_hresult) ? session->gpu_initialization_hresult : E_FAIL,
+            L"GPU hardware was detected, so CPU/GDI fallback was blocked. The GPU recording path must succeed.");
+        write_manifest(*session, false);
+        release_legacy_capture_resources(*session);
+        return sr_result_invalid_state;
+    }
+
     if (!using_gpu_path && options->encoder_preference == sr_encoder_preference_hardware_only)
     {
+        session->cpu_fallback_allowed = false;
+        session->cpu_fallback_blocked = true;
+        session->cpu_fallback_block_reason = "hardware-only-request-without-compatible-gpu";
+        fail_session(*session, E_FAIL, L"Hardware-only recording was requested but no compatible GPU path is available.");
+        write_manifest(*session, false);
+        release_legacy_capture_resources(*session);
         return sr_result_invalid_state;
     }
 
@@ -1203,6 +1475,34 @@ int32_t __stdcall sr_engine_start(sr_engine_handle engine, const sr_capture_sour
         join_recording_threads(*session);
         release_legacy_capture_resources(*session);
         return sr_result_invalid_state;
+    }
+
+    if (session->mode == pipeline_mode::gpu_first)
+    {
+        bool startup_ready = false;
+        bool startup_failed = false;
+        {
+            std::unique_lock lock(session->gate);
+            startup_ready = session->gpu_start_condition.wait_for(lock, std::chrono::seconds(10), [&session]
+            {
+                return session->gpu_encoder_ready || session->capture_finished || FAILED(session->failure);
+            });
+
+            startup_failed = !startup_ready || !session->gpu_encoder_ready || FAILED(session->failure);
+        }
+
+        if (startup_failed)
+        {
+            if (!startup_ready)
+            {
+                fail_session(*session, E_FAIL, L"GPU recorder startup timed out before the encoder became ready.");
+            }
+
+            join_recording_threads(*session);
+            write_manifest(*session, false);
+            release_legacy_capture_resources(*session);
+            return sr_result_invalid_state;
+        }
     }
 
     {

@@ -51,13 +51,36 @@ internal static class NativeRecordingManifestReader
                 CaptureSlotCount: ReadInt32(root, "captureSlotCount"),
                 CaptureQueueLimit: ReadInt32(root, "captureQueueLimit"),
                 IsD3dMultithreadProtected: ReadBoolean(root, "d3dMultithreadProtected"),
+                IsGpuHardwareDetected: ReadBoolean(root, "gpuHardwareDetected"),
+                IsCpuFallbackAllowed: ReadBoolean(root, "cpuFallbackAllowed"),
+                IsCpuFallbackBlocked: ReadBoolean(root, "cpuFallbackBlocked"),
+                CpuFallbackBlockReason: ReadString(root, "cpuFallbackBlockReason") ?? "none",
+                GpuInitializationHresult: ReadString(root, "gpuInitializationHresult"),
+                CopyIntegrityStatus: ReadString(root, "copyIntegrityStatus") ?? "unknown",
+                CopyDimensionMismatchCount: ReadInt64(root, "copyDimensionMismatchCount"),
+                CopyIntegrityFailureReason: ReadString(root, "copyIntegrityFailureReason"),
                 WasWgcStartupAttempted: ReadBoolean(root, "wgcStartupAttempted"),
                 WgcFirstFrameLatencyMs: ReadDouble(root, "wgcFirstFrameLatencyMs"),
                 AdapterName: ReadString(root, "adapterName"),
                 CaptureAttempts: ReadInt64(root, "captureAttemptCount"),
                 RequestedFrameRate: ReadInt32(root, "requestedFrameRate"),
+                IsMonitorFrameRateMode: ReadBoolean(root, "isMonitorFrameRateMode"),
+                MonitorFrameRateLimit: ReadInt32(root, "monitorFrameRateLimit") is var monitorFrameRateLimit && monitorFrameRateLimit > 0
+                    ? monitorFrameRateLimit
+                    : 120,
                 TargetFrameRate: ReadInt32(root, "targetFrameRate"),
+                EffectiveFrameRate: ReadDouble(root, "effectiveFrameRate") is var effectiveFrameRate && effectiveFrameRate > 0
+                    ? effectiveFrameRate
+                    : ReadInt32(root, "targetFrameRate"),
+                MonitorRefreshRate: ReadInt32(root, "monitorRefreshRate"),
+                WasMonitorFrameRateCapped: ReadBoolean(root, "wasMonitorFrameRateCapped"),
+                FrameRatePolicy: ReadString(root, "frameRatePolicy") ?? "unknown",
+                FpsCapReason: ReadString(root, "fpsCapReason") ?? "none",
+                DuplicatedFrames: ReadInt64(root, "duplicatedFrameCount"),
                 AverageFramesPerSecond: ReadDouble(root, "averageEncodedFramesPerSecond"),
+                WallDurationMs: ReadDouble(root, "wallDurationMs"),
+                RepresentedDurationMs: ReadDouble(root, "representedDurationMs"),
+                RepresentedToWallDurationRatio: ReadDouble(root, "representedToWallDurationRatio"),
                 OutputWidth: ReadInt32(root, "outputWidth"),
                 OutputHeight: ReadInt32(root, "outputHeight"),
                 CapturedFrames: ReadInt64(root, "capturedFrameCount"),
@@ -71,6 +94,7 @@ internal static class NativeRecordingManifestReader
                 AverageConvertLatencyMs: ReadDouble(root, "averageConvertLatencyMs"),
                 AverageEncodeLatencyMs: ReadDouble(root, "averageEncodeLatencyMs"),
                 PeakQueueDepth: ReadInt32(root, "peakQueueDepth"),
+                FailureReason: ReadString(root, "failureReason"),
                 FailureHresult: ReadString(root, "failureHresult"),
                 QualityPresetName: ReadString(root, "qualityPresetName") ?? "Unknown",
                 TargetBitrateBps: ReadInt64(root, "targetBitrateBps"),
@@ -85,7 +109,12 @@ internal static class NativeRecordingManifestReader
                 YuvMatrix: ReadString(root, "yuvMatrix") ?? "unknown",
                 NominalRange: ReadString(root, "nominalRange") ?? "unknown",
                 D3dInputColorSpace: ReadString(root, "d3dInputColorSpace") ?? "unknown",
-                D3dOutputColorSpace: ReadString(root, "d3dOutputColorSpace") ?? "unknown");
+                D3dOutputColorSpace: ReadString(root, "d3dOutputColorSpace") ?? "unknown",
+                QualityPolicyVersion: ReadInt32(root, "qualityPolicyVersion"),
+                IsEncoderLowLatency: ReadBoolean(root, "encoderLowLatency"),
+                VideoProcessorUsage: ReadString(root, "videoProcessorUsage") ?? "unknown",
+                IsEdgeEnhancementRequested: ReadBoolean(root, "edgeEnhancementRequested"),
+                IsEdgeEnhancementApplied: ReadBoolean(root, "edgeEnhancementApplied"));
         }
         catch
         {

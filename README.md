@@ -5,9 +5,10 @@ SimpleRecorder is a minimal Windows desktop recorder with a compact WinUI 3 HUD 
 ## Product Focus
 - Record display, window, or region sources.
 - Keep the UI compact, direct, and based on the active `SimpleRecorder.pen` design source.
-- Prioritize GPU capture and encode paths when available through Windows and the installed NVIDIA, AMD, Intel, or platform encoder.
+- Require a real GPU/iGPU capture and verified hardware H.264 encode path when Windows exposes compatible hardware. CPU/GDI compatibility is only used when no compatible hardware graphics adapter is detected.
 - Use H.264 as the product codec for maximum compatibility.
-- Support professional screen quality targets: `480p`, `720p`, `1080p`, `1440p`, `4K`, and source/monitor-sized output when the selected monitor and encoder limits allow it.
+- Support professional screen quality targets: `480p`, `720p`, `1080p`, `1440p`, `4K`, and source/monitor-sized output capped at 4K height when the selected monitor and encoder limits allow it.
+- Treat the `120 fps` option as a professional high-refresh target capped at `120` FPS, with a constant output cadence and repeated frames only when capture cannot deliver a fresh frame for a timeline slot.
 - Support desktop audio, microphone audio, both, or neither as the product audio model.
 - Do not add camera recording, screenshots, watermarks, or recording time limits.
 
@@ -18,13 +19,12 @@ Implemented now:
 - Display, window, and region video recording.
 - H.264/MP4 output through Media Foundation.
 - GPU-first capture/processing with compatibility fallbacks.
-- Hardware-first encoder selection with conservative telemetry.
+- Verified hardware encoder selection with CPU/software fallback blocked whenever GPU hardware is detected.
 - Settings persistence and post-stop `.srrec/manifest.json` metadata.
 
 Not complete yet:
 - Real desktop audio and microphone capture.
 - Preview rendering.
-- 480p UI/API wiring.
 - Signing, packaging polish, and release automation.
 
 ## Architecture

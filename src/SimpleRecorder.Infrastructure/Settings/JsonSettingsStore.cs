@@ -116,7 +116,11 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     private static AppSettings NormalizeForCurrentSlice(AppSettings settings, out bool wasNormalized)
     {
+        var normalizedFrameRate = NormalizeFrameRate(settings.FrameRate);
+        var normalizedResolution = NormalizeResolution(settings.Resolution);
         var needsNormalization =
+            settings.FrameRate != normalizedFrameRate ||
+            settings.Resolution != normalizedResolution ||
             settings.SystemAudioEnabled ||
             settings.MicrophoneEnabled ||
             settings.MicrophoneDeviceId is not null ||
@@ -127,10 +131,35 @@ public sealed class JsonSettingsStore : ISettingsStore
             return settings;
         }
 
+        settings.FrameRate = normalizedFrameRate;
+        settings.Resolution = normalizedResolution;
         settings.SystemAudioEnabled = false;
         settings.MicrophoneEnabled = false;
         settings.MicrophoneDeviceId = null;
         settings.VideoCodec = VideoCodec.H264;
         return settings;
     }
+
+    private static FrameRateOption NormalizeFrameRate(FrameRateOption frameRate) =>
+        frameRate switch
+        {
+            FrameRateOption.Monitor or
+            FrameRateOption.Fps24 or
+            FrameRateOption.Fps30 or
+            FrameRateOption.Fps60 => frameRate,
+            _ when (int)frameRate > (int)FrameRateOption.Fps60 => FrameRateOption.Monitor,
+            _ => FrameRateOption.Fps60
+        };
+
+    private static ResolutionOption NormalizeResolution(ResolutionOption resolution) =>
+        resolution switch
+        {
+            ResolutionOption.Auto or
+            ResolutionOption.P480 or
+            ResolutionOption.P720 or
+            ResolutionOption.P1080 or
+            ResolutionOption.P1440 or
+            ResolutionOption.P2160 => resolution,
+            _ => ResolutionOption.Auto
+        };
 }

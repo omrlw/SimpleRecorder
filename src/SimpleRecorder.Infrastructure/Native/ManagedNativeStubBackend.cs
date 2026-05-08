@@ -16,11 +16,13 @@ internal sealed class ManagedNativeStubBackend
 
     public event EventHandler<RecorderStatusSnapshot>? StatusChanged;
 
+    public string? NativeUnavailableReason { get; set; }
+
     public RecorderStatusSnapshot CurrentStatus => _status;
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        Publish(new RecorderStatusSnapshot(RecorderState.Idle, _status.ActiveSource, Message: "Stub engine initialized."));
+        Publish(new RecorderStatusSnapshot(RecorderState.Idle, _status.ActiveSource, Message: BuildFallbackMessage()));
         return Task.CompletedTask;
     }
 
@@ -87,14 +89,14 @@ internal sealed class ManagedNativeStubBackend
                 RecorderState.SourceSelected,
                 _status.ActiveSource,
                 CurrentOutputPath: null,
-                Message: FallbackNoMediaMessage,
+                Message: BuildFallbackMessage(),
                 StartedAtUtc: null));
 
             return new RecordingResult(
                 false,
                 null,
                 duration,
-                ErrorMessage: FallbackNoMediaMessage);
+                ErrorMessage: BuildFallbackMessage());
         }
         finally
         {
@@ -107,4 +109,9 @@ internal sealed class ManagedNativeStubBackend
         _status = status;
         StatusChanged?.Invoke(this, status);
     }
+
+    private string BuildFallbackMessage() =>
+        string.IsNullOrWhiteSpace(NativeUnavailableReason)
+            ? FallbackNoMediaMessage
+            : $"{FallbackNoMediaMessage} Native load detail: {NativeUnavailableReason}";
 }

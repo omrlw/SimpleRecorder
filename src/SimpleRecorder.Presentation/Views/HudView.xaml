@@ -167,10 +167,10 @@
                             <ComboBox
                                 IsEnabled="{Binding IsSettingsEnabled}"
                                 ItemsSource="{Binding ResolutionOptions}"
-                                SelectedItem="{Binding SelectedResolution, Mode=TwoWay}">
+                                SelectedItem="{Binding SelectedResolutionOption, Mode=TwoWay}">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding Converter={StaticResource OptionDisplayConverter}}" />
+                                        <TextBlock Text="{Binding DisplayName}" />
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>

@@ -27,12 +27,42 @@ internal static class NativeStructMapper
         };
     }
 
-    internal static RecordingOptions NormalizeOptions(RecordingOptions options) =>
-        options with
+    internal static RecordingOptions NormalizeOptions(RecordingOptions options)
+    {
+        var frameRate = NormalizeFrameRate(options.FrameRate);
+        var resolution = NormalizeResolution(options.Resolution);
+        return options with
         {
+            FrameRate = frameRate,
+            Resolution = resolution,
             SaveDirectory = string.IsNullOrWhiteSpace(options.SaveDirectory)
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "SimpleRecorder")
-                : options.SaveDirectory
+                : options.SaveDirectory,
+            VideoProfile = QualityProfileMapper.Map(frameRate, resolution, options.QualityPreset)
+        };
+    }
+
+    private static FrameRateOption NormalizeFrameRate(FrameRateOption frameRate) =>
+        frameRate switch
+        {
+            FrameRateOption.Monitor or
+            FrameRateOption.Fps24 or
+            FrameRateOption.Fps30 or
+            FrameRateOption.Fps60 => frameRate,
+            _ when (int)frameRate > (int)FrameRateOption.Fps60 => FrameRateOption.Monitor,
+            _ => FrameRateOption.Fps60
+        };
+
+    private static ResolutionOption NormalizeResolution(ResolutionOption resolution) =>
+        resolution switch
+        {
+            ResolutionOption.Auto or
+            ResolutionOption.P480 or
+            ResolutionOption.P720 or
+            ResolutionOption.P1080 or
+            ResolutionOption.P1440 or
+            ResolutionOption.P2160 => resolution,
+            _ => ResolutionOption.Auto
         };
 
     internal static NativeMethods.SrCaptureSource ToNativeSource(CaptureSourceDescriptor source)

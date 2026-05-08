@@ -44,6 +44,7 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             return Task.CompletedTask;
         }
 
+        _stubBackend.NativeUnavailableReason ??= "Native initialization returned false without a detailed error.";
         return _stubBackend.InitializeAsync(cancellationToken);
     }
 
@@ -70,10 +71,25 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             normalizedOptions.SaveDirectory,
             normalizedSource.Kind);
         ThrowIfNativeCallFailed(NativeMethods.PrepareRecordingOutput(_engineHandle, _plannedRecordingSessionPath));
-        ThrowIfNativeCallFailed(NativeMethods.Start(
+        var startResult = (NativeMethods.SrResultCode)NativeMethods.Start(
             _engineHandle,
             NativeStructMapper.ToNativeSource(normalizedSource),
-            NativeStructMapper.ToNativeOptions(normalizedOptions)));
+            NativeStructMapper.ToNativeOptions(normalizedOptions));
+        if (startResult != NativeMethods.SrResultCode.Ok)
+        {
+            var telemetry = NativeRecordingManifestReader.TryReadTelemetry(_plannedRecordingSessionPath);
+            var message = BuildStartFailedMessage(startResult, telemetry);
+            _startedAtUtc = null;
+            _plannedRecordingSessionPath = null;
+
+            Publish(new RecorderStatusSnapshot(
+                RecorderState.SourceSelected,
+                _activeSource,
+                Message: message,
+                Telemetry: telemetry));
+
+            throw new InvalidOperationException(message);
+        }
 
         return Task.CompletedTask;
     }
@@ -179,8 +195,11 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
     {
         try
         {
-            if (NativeMethods.GetAbiVersion() != NativeMethods.CurrentAbiVersion)
+            var nativeAbiVersion = NativeMethods.GetAbiVersion();
+            if (nativeAbiVersion != NativeMethods.CurrentAbiVersion)
             {
+                _stubBackend.NativeUnavailableReason =
+                    $"ABI mismatch. Managed expects {NativeMethods.CurrentAbiVersion}, native reported {nativeAbiVersion}.";
                 return false;
             }
 
@@ -189,6 +208,7 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
                 _engineHandle = NativeMethods.Create();
                 if (_engineHandle == nint.Zero)
                 {
+                    _stubBackend.NativeUnavailableReason = "sr_engine_create returned a null engine handle.";
                     return false;
                 }
 
@@ -198,11 +218,13 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
 
             ThrowIfNativeCallFailed(NativeMethods.Initialize(_engineHandle));
             _isUsingNative = true;
+            _stubBackend.NativeUnavailableReason = null;
             return true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
             _isUsingNative = false;
+            _stubBackend.NativeUnavailableReason = ex.Message;
             if (_engineHandle != nint.Zero)
             {
                 NativeMethods.Destroy(_engineHandle);
@@ -343,6 +365,48 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             : $"; failure HRESULT {telemetry.FailureHresult}";
         return
             $"Recording stop failed with {failureReason}. {outputName} may be incomplete; telemetry: {telemetry.CaptureBackend} + {telemetry.EncodeBackend}, {telemetry.AverageFramesPerSecond:F1} FPS avg, {telemetry.OutputWidth}x{telemetry.OutputHeight}, {telemetry.DroppedFrames} dropped{fallbackDetail}{captureFailureDetail}{failureHresult}.";
+    }
+
+    private static string BuildStartFailedMessage(
+        NativeMethods.SrResultCode result,
+        RecordingSessionTelemetry? telemetry)
+    {
+        if (telemetry is null)
+        {
+            return $"Native start failed with {result}; no telemetry manifest was available.";
+        }
+
+        var failureHresult = string.IsNullOrWhiteSpace(telemetry.FailureHresult)
+            ? string.Empty
+            : $" ({telemetry.FailureHresult})";
+
+        if (string.Equals(
+                telemetry.HardwareEncodeStatus,
+                "hardware-required-for-monitor-high-fps",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var displayRate = telemetry.MonitorRefreshRate > 0
+                ? $" on a {telemetry.MonitorRefreshRate} Hz display"
+                : string.Empty;
+            var adapter = string.IsNullOrWhiteSpace(telemetry.AdapterName)
+                ? telemetry.EncoderName
+                : telemetry.AdapterName;
+
+            return
+                $"Native start failed with {result}. Monitor mode targeted {telemetry.TargetFrameRate} FPS{displayRate} and requires verified hardware H.264 encode, but {adapter} rejected hardware negotiation{failureHresult}. No software fallback was used.";
+        }
+
+        if (telemetry.IsCpuFallbackBlocked)
+        {
+            return
+                $"Native start failed with {result}. GPU hardware was detected, so CPU/software fallback was blocked ({telemetry.CpuFallbackBlockReason}){failureHresult}.";
+        }
+
+        var failureReason = string.IsNullOrWhiteSpace(telemetry.FailureReason)
+            ? $"native encoder status {telemetry.HardwareEncodeStatus}"
+            : telemetry.FailureReason;
+
+        return $"Native start failed with {result}. {failureReason}{failureHresult}.";
     }
 
     private static string DescribeEncodeMode(RecordingSessionTelemetry telemetry) =>

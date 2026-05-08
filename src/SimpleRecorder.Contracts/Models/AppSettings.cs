@@ -4,7 +4,7 @@ namespace SimpleRecorder.Contracts.Models;
 
 public sealed class AppSettings
 {
-    public FrameRateOption FrameRate { get; set; } = FrameRateOption.Fps120;
+    public FrameRateOption FrameRate { get; set; } = FrameRateOption.Fps60;
 
     public ResolutionOption Resolution { get; set; } = ResolutionOption.Auto;
 

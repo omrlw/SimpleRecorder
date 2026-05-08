@@ -28,13 +28,8 @@
 
     void encoder_backend::prepare_slot_samples()
     {
-        auto check = [](HRESULT hr, const wchar_t* stage)
-        {
-            if (FAILED(hr))
-            {
-                throw winrt::hresult_error(hr, stage);
-            }
-        };
+        D3D11_TEXTURE2D_DESC texture_desc{};
+        bool has_texture_desc = false;
 
         for (auto& slot : _session.gpu_slots)
         {
@@ -43,22 +38,82 @@
                 throw winrt::hresult_error(E_POINTER, L"GPU slot has no NV12 texture.");
             }
 
-            check(MFCreateDXGISurfaceBuffer(
-                __uuidof(ID3D11Texture2D),
-                slot.nv12_texture.Get(),
-                0,
-                FALSE,
-                &slot.sample_buffer), L"MFCreateDXGISurfaceBuffer");
-
-            check(slot.sample_buffer->GetMaxLength(&slot.sample_buffer_length), L"IMFMediaBuffer::GetMaxLength");
-            if (slot.sample_buffer_length == 0)
+            if (!has_texture_desc)
             {
-                slot.sample_buffer_length = static_cast<DWORD>(_session.output_width * _session.output_height * 3 / 2);
+                slot.nv12_texture->GetDesc(&texture_desc);
+                has_texture_desc = true;
             }
 
-            check(MFCreateSample(&slot.sample), L"MFCreateSample");
-            check(slot.sample->AddBuffer(slot.sample_buffer.Get()), L"IMFSample::AddBuffer");
+            slot.sample_buffer.Reset();
+            slot.sample.Reset();
+            slot.sample_buffer_length = static_cast<DWORD>(_session.output_width * _session.output_height * 3 / 2);
         }
+
+        if (!has_texture_desc)
+        {
+            throw winrt::hresult_error(E_POINTER, L"GPU encoder has no NV12 textures.");
+        }
+
+        prepare_encode_snapshot_pool(texture_desc);
+    }
+
+    void encoder_backend::prepare_encode_snapshot_pool(const D3D11_TEXTURE2D_DESC& texture_desc)
+    {
+        auto check = [](HRESULT hr, const wchar_t* stage)
+        {
+            if (FAILED(hr))
+            {
+                throw winrt::hresult_error(hr, stage);
+            }
+        };
+
+        if (texture_desc.Format != DXGI_FORMAT_NV12 ||
+            texture_desc.Width != static_cast<UINT>(_session.output_width) ||
+            texture_desc.Height != static_cast<UINT>(_session.output_height))
+        {
+            throw winrt::hresult_error(E_INVALIDARG, L"GPU encoder NV12 texture shape does not match output geometry.");
+        }
+
+        const auto snapshot_count = std::max(
+            capture_slot_count * encode_snapshot_pool_multiplier,
+            encode_snapshot_pool_minimum);
+        const DWORD fallback_buffer_length = static_cast<DWORD>(_session.output_width * _session.output_height * 3 / 2);
+
+        _encode_snapshots.clear();
+        _encode_snapshots.resize(snapshot_count);
+        _next_encode_snapshot = 0;
+
+        for (auto& snapshot : _encode_snapshots)
+        {
+            check(_d3d.device->CreateTexture2D(&texture_desc, nullptr, &snapshot.texture), L"CreateTexture2D(encode snapshot pool)");
+            check(MFCreateDXGISurfaceBuffer(
+                __uuidof(ID3D11Texture2D),
+                snapshot.texture.Get(),
+                0,
+                FALSE,
+                &snapshot.sample_buffer), L"MFCreateDXGISurfaceBuffer(snapshot pool)");
+
+            check(snapshot.sample_buffer->GetMaxLength(&snapshot.sample_buffer_length), L"IMFMediaBuffer::GetMaxLength(snapshot pool)");
+            if (snapshot.sample_buffer_length == 0)
+            {
+                snapshot.sample_buffer_length = fallback_buffer_length;
+            }
+
+            check(MFCreateSample(&snapshot.sample), L"MFCreateSample(snapshot pool)");
+            check(snapshot.sample->AddBuffer(snapshot.sample_buffer.Get()), L"IMFSample::AddBuffer(snapshot pool)");
+        }
+    }
+
+    encode_snapshot_slot& encoder_backend::next_encode_snapshot()
+    {
+        if (_encode_snapshots.empty())
+        {
+            throw winrt::hresult_error(E_UNEXPECTED, L"GPU encoder snapshot pool is not initialized.");
+        }
+
+        auto& snapshot = _encode_snapshots[_next_encode_snapshot];
+        _next_encode_snapshot = (_next_encode_snapshot + 1) % _encode_snapshots.size();
+        return snapshot;
     }
 
     void encoder_backend::write_slot(gpu_capture_slot& slot, LONGLONG sample_time, LONGLONG sample_duration)
@@ -71,15 +126,19 @@
             }
         };
 
-        if (slot.sample_buffer == nullptr || slot.sample == nullptr || slot.sample_buffer_length == 0)
+        if (slot.nv12_texture == nullptr)
         {
-            throw winrt::hresult_error(E_POINTER, L"GPU slot sample resources were not prepared.");
+            throw winrt::hresult_error(E_POINTER, L"GPU slot has no NV12 texture.");
         }
 
-        check(slot.sample_buffer->SetCurrentLength(slot.sample_buffer_length), L"IMFMediaBuffer::SetCurrentLength");
-        check(slot.sample->SetSampleTime(sample_time), L"IMFSample::SetSampleTime");
-        check(slot.sample->SetSampleDuration(std::max<LONGLONG>(sample_duration, 1)), L"IMFSample::SetSampleDuration");
-        check(_sink_writer->WriteSample(_stream_index, slot.sample.Get()), L"IMFSinkWriter::WriteSample");
+        auto& snapshot = next_encode_snapshot();
+        _d3d.context->CopyResource(snapshot.texture.Get(), slot.nv12_texture.Get());
+        _d3d.context->Flush();
+
+        check(snapshot.sample_buffer->SetCurrentLength(snapshot.sample_buffer_length), L"IMFMediaBuffer::SetCurrentLength(snapshot)");
+        check(snapshot.sample->SetSampleTime(sample_time), L"IMFSample::SetSampleTime");
+        check(snapshot.sample->SetSampleDuration(std::max<LONGLONG>(sample_duration, 1)), L"IMFSample::SetSampleDuration");
+        check(_sink_writer->WriteSample(_stream_index, snapshot.sample.Get()), L"IMFSinkWriter::WriteSample");
     }
 
     HRESULT encoder_backend::finalize() noexcept
@@ -132,7 +191,7 @@
 
         if (probe.has_h264_nv12_hardware)
         {
-            result = create_sink_writer(true, true, true, true);
+            result = create_sink_writer(true, false, true, true);
             if (SUCCEEDED(result))
             {
                 _hardware_encode = true;
@@ -144,7 +203,7 @@
             }
 
             strict_stage = _last_stage;
-            result = create_sink_writer(true, true, false, true);
+            result = create_sink_writer(true, false, false, true);
             if (SUCCEEDED(result))
             {
                 _hardware_encode = true;
@@ -166,43 +225,20 @@
             return winrt::throw_hresult(result);
         }
 
-        result = create_sink_writer(true, true, true, true);
-        if (SUCCEEDED(result))
-        {
-            _hardware_encode = false;
-            _session.encoder_config_status = "configured";
-            _session.encoder_selection_reason = "hardware-requested-unverified";
-            _session.encoder_fallback_reason = "hardware-only-negotiation-failed";
-            _session.hardware_encode_status = "unverified-hardware-requested";
-            return;
-        }
-
-        const auto unverified_configured_stage = _last_stage;
-        result = create_sink_writer(true, true, false, true);
-        if (SUCCEEDED(result))
-        {
-            _hardware_encode = false;
-            _session.encoder_config_status = "fallback-without-encoder-config";
-            _session.encoder_selection_reason = "hardware-requested-unverified-without-config";
-            _session.encoder_fallback_reason = "encoder-config-rejected";
-            _session.hardware_encode_status = "unverified-hardware-requested";
-            return;
-        }
-
-        const auto unverified_unconfigured_stage = _last_stage;
-        result = create_sink_writer(true, false, false, false);
-        if (SUCCEEDED(result))
-        {
-            _hardware_encode = false;
-            _session.encoder_config_status = "fallback-compatible";
-            _session.encoder_selection_reason = "software-compatible-d3d11";
-            _session.encoder_fallback_reason = "hardware-transform-negotiation-failed";
-            _session.hardware_encode_status = "verified-software";
-            return;
-        }
+        const auto strict_failure_reason = probe.has_h264_nv12_hardware
+            ? "hardware-encoder-negotiation-failed-cpu-fallback-blocked"
+            : "no-h264-nv12-hardware-mft-cpu-fallback-blocked";
+        _session.cpu_fallback_blocked = true;
+        _session.cpu_fallback_allowed = false;
+        _session.cpu_fallback_block_reason = strict_failure_reason;
+        _session.encoder_selection_reason = "gpu-present-requires-verified-hardware-encode";
+        _session.encoder_fallback_reason = strict_failure_reason;
+        _session.hardware_encode_status = probe.has_h264_nv12_hardware
+            ? "hardware-negotiation-failed"
+            : "hardware-required-unavailable";
 
         std::wstringstream message;
-        message << L"Failed to initialize the D3D11 sink writer.";
+        message << L"GPU recording requires verified hardware H.264 encode; CPU/software fallback is blocked.";
         if (!strict_stage.empty())
         {
             message << L" strict-stage=" << strict_stage << L";";
@@ -210,14 +246,6 @@
         if (!_last_stage.empty())
         {
             message << L" negotiated-stage=" << _last_stage;
-        }
-        if (!unverified_configured_stage.empty())
-        {
-            message << L"; unverified-configured-stage=" << unverified_configured_stage;
-        }
-        if (!unverified_unconfigured_stage.empty())
-        {
-            message << L"; unverified-unconfigured-stage=" << unverified_unconfigured_stage;
         }
         if (!unconfigured_strict_stage.empty())
         {
@@ -256,10 +284,13 @@
             return fail(result, L"Set(MF_SINK_WRITER_DISABLE_THROTTLING)");
         }
 
-        result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
-        if (FAILED(result))
+        if (_session.quality_config.low_latency_requested)
         {
-            return fail(result, L"Set(MF_LOW_LATENCY)");
+            result = attributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+            if (FAILED(result))
+            {
+                return fail(result, L"Set(MF_LOW_LATENCY)");
+            }
         }
 
         if (disable_converters)
