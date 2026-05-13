@@ -38,5 +38,6 @@
 
   <Capabilities>
     <uap6:Capability Name="graphicsCapture" />
+    <DeviceCapability Name="microphone" />
   </Capabilities>
 </Package>

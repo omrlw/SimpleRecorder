@@ -12,6 +12,8 @@ public sealed class AppSettings
 
     public CountdownOption Countdown { get; set; } = CountdownOption.FiveSeconds;
 
+    public AudioCaptureMode AudioMode { get; set; } = AudioCaptureMode.Off;
+
     public bool SystemAudioEnabled { get; set; } = false;
 
     public bool MicrophoneEnabled { get; set; } = false;
@@ -38,11 +40,26 @@ public sealed class AppSettings
             Resolution,
             QualityPreset,
             Countdown,
-            SystemAudioEnabled,
-            MicrophoneEnabled,
+            ResolveAudioMode(),
             MicrophoneDeviceId,
             SaveDirectory,
             EncoderPreference,
             VideoCodec,
             QualityProfileMapper.Map(FrameRate, Resolution, QualityPreset));
+
+    public AudioCaptureMode ResolveAudioMode()
+    {
+        if (AudioMode != AudioCaptureMode.Off)
+        {
+            return AudioMode;
+        }
+
+        return (SystemAudioEnabled, MicrophoneEnabled) switch
+        {
+            (true, true) => AudioCaptureMode.SystemAndMicrophone,
+            (true, false) => AudioCaptureMode.System,
+            (false, true) => AudioCaptureMode.Microphone,
+            _ => AudioCaptureMode.Off
+        };
+    }
 }

@@ -18,6 +18,7 @@ internal static class CompositionRoot
         services.AddSingleton<ISettingsStore, JsonSettingsStore>();
         services.AddSingleton<IAudioDeviceCatalog, AudioDeviceCatalog>();
         services.AddSingleton<ICaptureSourcePicker, CaptureSourcePicker>();
+        services.AddSingleton<ICompatibilityReportService, NativeCompatibilityReportService>();
         services.AddSingleton<IRecorderController, NativeRecorderController>();
         services.AddSingleton<ITrayService, TrayIconService>();
         services.AddSingleton<HudViewModel>();

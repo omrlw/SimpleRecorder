@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 static const uint32_t sr_abi_version = 3;
-static const uint32_t sr_struct_version = 2;
+static const uint32_t sr_struct_version = 3;
 
 enum sr_result_code
 {
@@ -46,6 +46,14 @@ enum sr_video_codec
     sr_video_codec_av1 = 2
 };
 
+enum sr_audio_capture_mode
+{
+    sr_audio_capture_off = 0,
+    sr_audio_capture_system = 1,
+    sr_audio_capture_microphone = 2,
+    sr_audio_capture_system_and_microphone = 3
+};
+
 struct sr_rect
 {
     int32_t x;
@@ -73,6 +81,8 @@ struct sr_recording_options
     int32_t include_microphone;
     int32_t encoder_preference;
     int32_t video_codec;
+    int32_t audio_mode;
+    const wchar_t* microphone_device_id;
 };
 
 struct sr_status_event

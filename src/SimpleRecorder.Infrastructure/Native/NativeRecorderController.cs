@@ -71,12 +71,23 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
             normalizedOptions.SaveDirectory,
             normalizedSource.Kind);
         ThrowIfNativeCallFailed(NativeMethods.PrepareRecordingOutput(_engineHandle, _plannedRecordingSessionPath));
-        var startResult = (NativeMethods.SrResultCode)NativeMethods.Start(
-            _engineHandle,
-            NativeStructMapper.ToNativeSource(normalizedSource),
-            NativeStructMapper.ToNativeOptions(normalizedOptions));
-        if (startResult != NativeMethods.SrResultCode.Ok)
+        var microphoneDeviceId = nint.Zero;
+        try
         {
+            if (!string.IsNullOrWhiteSpace(normalizedOptions.MicrophoneDeviceId))
+            {
+                microphoneDeviceId = Marshal.StringToCoTaskMemUni(normalizedOptions.MicrophoneDeviceId);
+            }
+
+            var startResult = (NativeMethods.SrResultCode)NativeMethods.Start(
+                _engineHandle,
+                NativeStructMapper.ToNativeSource(normalizedSource),
+                NativeStructMapper.ToNativeOptions(normalizedOptions, microphoneDeviceId));
+            if (startResult == NativeMethods.SrResultCode.Ok)
+            {
+                return Task.CompletedTask;
+            }
+
             var telemetry = NativeRecordingManifestReader.TryReadTelemetry(_plannedRecordingSessionPath);
             var message = BuildStartFailedMessage(startResult, telemetry);
             _startedAtUtc = null;
@@ -90,8 +101,13 @@ public sealed class NativeRecorderController : IRecorderController, IDisposable
 
             throw new InvalidOperationException(message);
         }
-
-        return Task.CompletedTask;
+        finally
+        {
+            if (microphoneDeviceId != nint.Zero)
+            {
+                Marshal.FreeCoTaskMem(microphoneDeviceId);
+            }
+        }
     }
 
     public Task PauseAsync(CancellationToken cancellationToken = default)

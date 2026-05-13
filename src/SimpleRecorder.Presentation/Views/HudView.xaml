@@ -146,6 +146,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
@@ -210,10 +211,34 @@
                                 Foreground="#F5F5F5"
                                 IsChecked="{Binding RememberLastSource, Mode=TwoWay}"
                                 IsEnabled="{Binding IsSettingsEnabled}" />
-                            <TextBlock
-                                Foreground="#A3A3A3"
-                                Text="Audio capture is not active in the current slice, so audio controls are intentionally hidden from this workbench UI."
-                                TextWrapping="WrapWholeWords" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="3" Grid.Column="0" Spacing="4">
+                            <TextBlock Foreground="#A3A3A3" Text="Audio" />
+                            <ComboBox
+                                IsEnabled="{Binding IsSettingsEnabled}"
+                                ItemsSource="{Binding AudioModeOptions}"
+                                SelectedItem="{Binding SelectedAudioMode, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={StaticResource OptionDisplayConverter}}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+                            <TextBlock Foreground="#A3A3A3" Text="Microphone" />
+                            <ComboBox
+                                IsEnabled="{Binding IsMicrophoneDeviceSelectionEnabled}"
+                                ItemsSource="{Binding MicrophoneDevices}"
+                                SelectedItem="{Binding SelectedMicrophoneDevice, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding DisplayName}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                         </StackPanel>
                     </Grid>
                 </StackPanel>
@@ -255,6 +280,21 @@
 
                         <TextBlock Grid.Row="5" Grid.Column="0" Foreground="#A3A3A3" Text="Queue" />
                         <TextBlock Grid.Row="5" Grid.Column="1" Foreground="#F5F5F5" Text="{Binding TelemetryQueueLabel}" TextWrapping="WrapWholeWords" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Foreground="#A3A3A3" Text="Diagnostics" />
+                        <Button
+                            Grid.Row="6"
+                            Grid.Column="1"
+                            Command="{Binding GenerateCompatibilityReportCommand}"
+                            HorizontalAlignment="Left"
+                            MinWidth="180"
+                            Padding="12,0"
+                            Style="{StaticResource HudSourceButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                                <TextBlock Text="Compatibility report" />
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </StackPanel>
             </StackPanel>

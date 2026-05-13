@@ -35,6 +35,7 @@ public sealed class HudViewModel : ObservableObject
     private readonly ISettingsStore _settingsStore;
     private readonly IAudioDeviceCatalog _audioDeviceCatalog;
     private readonly ICaptureSourcePicker _captureSourcePicker;
+    private readonly ICompatibilityReportService _compatibilityReportService;
     private AppSettings _settings = new();
     private HudSessionState _sessionState = HudSessionState.Idle;
     private HudFeedbackState _feedbackState;
@@ -51,18 +52,27 @@ public sealed class HudViewModel : ObservableObject
         IRecorderController recorderController,
         ISettingsStore settingsStore,
         IAudioDeviceCatalog audioDeviceCatalog,
-        ICaptureSourcePicker captureSourcePicker)
+        ICaptureSourcePicker captureSourcePicker,
+        ICompatibilityReportService compatibilityReportService)
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _recorderController = recorderController;
         _settingsStore = settingsStore;
         _audioDeviceCatalog = audioDeviceCatalog;
         _captureSourcePicker = captureSourcePicker;
+        _compatibilityReportService = compatibilityReportService;
         _lastRecorderStatus = recorderController.CurrentStatus;
 
         _recorderController.StatusChanged += RecorderControllerOnStatusChanged;
 
         Microphones = new ObservableCollection<AudioInputDevice>();
+        AudioModeOptions =
+        [
+            AudioCaptureMode.Off,
+            AudioCaptureMode.System,
+            AudioCaptureMode.Microphone,
+            AudioCaptureMode.SystemAndMicrophone
+        ];
         FrameRateOptions =
         [
             FrameRateOption.Fps24,
@@ -86,6 +96,7 @@ public sealed class HudViewModel : ObservableObject
         SelectDisplaySourceCommand = new AsyncRelayCommand(SelectDisplaySourceAsync, () => IsSourceSelectionEnabled);
         SelectWindowSourceCommand = new AsyncRelayCommand(SelectWindowSourceAsync, () => IsSourceSelectionEnabled);
         SelectRegionSourceCommand = new AsyncRelayCommand(SelectRegionSourceAsync, () => IsSourceSelectionEnabled);
+        GenerateCompatibilityReportCommand = new AsyncRelayCommand(GenerateCompatibilityReportAsync, () => IsSettingsEnabled);
         ToggleMicrophoneCommand = new RelayCommand(() =>
         {
             if (IsMicrophoneToggleEnabled)
@@ -104,6 +115,8 @@ public sealed class HudViewModel : ObservableObject
     }
 
     public ObservableCollection<AudioInputDevice> Microphones { get; }
+
+    public IReadOnlyList<AudioCaptureMode> AudioModeOptions { get; }
 
     public IReadOnlyList<FrameRateOption> FrameRateOptions { get; }
 
@@ -126,6 +139,8 @@ public sealed class HudViewModel : ObservableObject
     public AsyncRelayCommand SelectWindowSourceCommand { get; }
 
     public AsyncRelayCommand SelectRegionSourceCommand { get; }
+
+    public AsyncRelayCommand GenerateCompatibilityReportCommand { get; }
 
     public RelayCommand ToggleMicrophoneCommand { get; }
 
@@ -193,7 +208,7 @@ public sealed class HudViewModel : ObservableObject
     {
         get
         {
-            if (!IsMicrophoneEnabled)
+            if (!DoesSelectedAudioModeUseMicrophone)
             {
                 return "Off";
             }
@@ -355,41 +370,62 @@ public sealed class HudViewModel : ObservableObject
         }
     }
 
-    public bool IsSystemAudioEnabled
+    public AudioCaptureMode SelectedAudioMode
     {
-        get => _settings.SystemAudioEnabled;
+        get => _settings.ResolveAudioMode();
         set
         {
-            if (_settings.SystemAudioEnabled == value)
+            if (_settings.ResolveAudioMode() == value)
             {
                 return;
             }
 
-            _settings.SystemAudioEnabled = value;
+            _settings.AudioMode = value;
+            _settings.SystemAudioEnabled = false;
+            _settings.MicrophoneEnabled = false;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSystemAudioEnabled));
+            OnPropertyChanged(nameof(IsMicrophoneEnabled));
+            OnPropertyChanged(nameof(SelectedMicrophoneDisplayName));
+            OnPropertyChanged(nameof(IsMicrophoneDeviceSelectionEnabled));
+            OnPropertyChanged(nameof(DoesSelectedAudioModeUseMicrophone));
+            OnPropertyChanged(nameof(MicrophoneIndicatorVisibility));
+            OnPropertyChanged(nameof(MicrophoneDisabledSlashVisibility));
             PersistSettings();
+        }
+    }
+
+    public bool IsSystemAudioEnabled
+    {
+        get => SelectedAudioMode is AudioCaptureMode.System or AudioCaptureMode.SystemAndMicrophone;
+        set
+        {
+            var nextMode = value
+                ? IsMicrophoneEnabled ? AudioCaptureMode.SystemAndMicrophone : AudioCaptureMode.System
+                : IsMicrophoneEnabled ? AudioCaptureMode.Microphone : AudioCaptureMode.Off;
+            if (SelectedAudioMode == nextMode)
+            {
+                return;
+            }
+
+            SelectedAudioMode = nextMode;
         }
     }
 
     public bool IsMicrophoneEnabled
     {
-        get => _settings.MicrophoneEnabled;
+        get => SelectedAudioMode is AudioCaptureMode.Microphone or AudioCaptureMode.SystemAndMicrophone;
         set
         {
-            if (_settings.MicrophoneEnabled == value)
+            var nextMode = value
+                ? IsSystemAudioEnabled ? AudioCaptureMode.SystemAndMicrophone : AudioCaptureMode.Microphone
+                : IsSystemAudioEnabled ? AudioCaptureMode.System : AudioCaptureMode.Off;
+            if (SelectedAudioMode == nextMode)
             {
                 return;
             }
 
-            _settings.MicrophoneEnabled = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(SelectedMicrophoneDisplayName));
-            OnPropertyChanged(nameof(MicrophoneButtonBrush));
-            OnPropertyChanged(nameof(MicrophoneGlyphForeground));
-            OnPropertyChanged(nameof(MicrophoneIndicatorVisibility));
-            OnPropertyChanged(nameof(MicrophoneDisabledSlashVisibility));
-            OnPropertyChanged(nameof(IsMicrophoneDeviceSelectionEnabled));
-            PersistSettings();
+            SelectedAudioMode = nextMode;
         }
     }
 
@@ -675,7 +711,10 @@ public sealed class HudViewModel : ObservableObject
         }
     }
 
-    public bool IsMicrophoneDeviceSelectionEnabled => IsSettingsEnabled && IsMicrophoneEnabled && Microphones.Count > 0;
+    public bool IsMicrophoneDeviceSelectionEnabled => IsSettingsEnabled && DoesSelectedAudioModeUseMicrophone && Microphones.Count > 0;
+
+    public bool DoesSelectedAudioModeUseMicrophone =>
+        SelectedAudioMode is AudioCaptureMode.Microphone or AudioCaptureMode.SystemAndMicrophone;
 
     public Brush PrimaryButtonBrush => UsesActiveActionPalette ? AccentBrush : DarkerBrush;
 
@@ -948,6 +987,33 @@ public sealed class HudViewModel : ObservableObject
             static (picker, currentSource, cancellationToken) => picker.SelectRegionSourceAsync(currentSource, cancellationToken),
             "Region selection was cancelled.");
 
+    private async Task GenerateCompatibilityReportAsync()
+    {
+        if (!IsSettingsEnabled)
+        {
+            return;
+        }
+
+        StatusText = "Generating compatibility report...";
+        try
+        {
+            var result = await _compatibilityReportService.GenerateAsync().ConfigureAwait(true);
+            if (result.IsSuccessful)
+            {
+                StatusText = $"Compatibility report saved to {result.ReportPath}.";
+                ShowNonBlockingFeedback("Compatibility report generated.");
+                return;
+            }
+
+            StatusText = $"Compatibility report saved with errors to {result.ReportPath}.";
+            ShowNonBlockingError(result.ErrorMessage ?? "Compatibility report failed.");
+        }
+        catch (Exception ex)
+        {
+            ShowNonBlockingError($"Compatibility report failed. {ex.Message}");
+        }
+    }
+
     private async Task PickSourceAsync(
         Func<ICaptureSourcePicker, CaptureSourceDescriptor?, CancellationToken, Task<CaptureSourceDescriptor?>> pickerAction,
         string nullResultMessage)
@@ -1085,6 +1151,7 @@ public sealed class HudViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedQuality));
         OnPropertyChanged(nameof(SelectedCountdown));
         OnPropertyChanged(nameof(SelectedEncoderPreference));
+        OnPropertyChanged(nameof(SelectedAudioMode));
         OnPropertyChanged(nameof(IsSystemAudioEnabled));
         OnPropertyChanged(nameof(IsMicrophoneEnabled));
         OnPropertyChanged(nameof(SelectedMicrophoneDeviceId));
@@ -1097,6 +1164,7 @@ public sealed class HudViewModel : ObservableObject
         OnPropertyChanged(nameof(MicrophoneGlyphForeground));
         OnPropertyChanged(nameof(MicrophoneIndicatorVisibility));
         OnPropertyChanged(nameof(MicrophoneDisabledSlashVisibility));
+        OnPropertyChanged(nameof(DoesSelectedAudioModeUseMicrophone));
         RaiseWorkbenchDetailsChanged();
     }
 
@@ -1145,6 +1213,7 @@ public sealed class HudViewModel : ObservableObject
         SelectDisplaySourceCommand.RaiseCanExecuteChanged();
         SelectWindowSourceCommand.RaiseCanExecuteChanged();
         SelectRegionSourceCommand.RaiseCanExecuteChanged();
+        GenerateCompatibilityReportCommand.RaiseCanExecuteChanged();
     }
 
     private void PersistSettings()
@@ -1353,14 +1422,15 @@ public sealed class HudViewModel : ObservableObject
             LastSourceKind = settings.LastSourceKind,
             LastSourceToken = settings.LastSourceToken,
             MicrophoneDeviceId = settings.MicrophoneDeviceId,
-            MicrophoneEnabled = settings.MicrophoneEnabled,
+            AudioMode = settings.ResolveAudioMode(),
+            MicrophoneEnabled = false,
             QualityPreset = settings.QualityPreset,
             EncoderPreference = settings.EncoderPreference,
             VideoCodec = settings.VideoCodec,
             RememberLastSource = settings.RememberLastSource,
             Resolution = settings.Resolution,
             SaveDirectory = settings.SaveDirectory,
-            SystemAudioEnabled = settings.SystemAudioEnabled
+            SystemAudioEnabled = false
         };
 
     private Brush GetSourceButtonBackground(CaptureSourceKind kind) =>

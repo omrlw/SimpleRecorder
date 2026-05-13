@@ -89,7 +89,23 @@ internal static class NativeStructMapper
             options.IsSystemAudioEnabled ? 1 : 0,
             options.IsMicrophoneEnabled ? 1 : 0,
             (int)options.EncoderPreference,
-            (int)options.VideoCodec);
+            (int)options.VideoCodec,
+            (int)options.AudioMode,
+            nint.Zero);
+
+    internal static NativeMethods.SrRecordingOptions ToNativeOptions(RecordingOptions options, nint microphoneDeviceId) =>
+        new(
+            NativeMethods.CurrentStructVersion,
+            (int)options.FrameRate,
+            (int)options.Resolution,
+            (int)options.QualityPreset,
+            (int)options.Countdown,
+            options.IsSystemAudioEnabled ? 1 : 0,
+            options.IsMicrophoneEnabled ? 1 : 0,
+            (int)options.EncoderPreference,
+            (int)options.VideoCodec,
+            (int)options.AudioMode,
+            microphoneDeviceId);
 
     internal static RecorderState ToContractState(NativeMethods.SrRecorderState state) =>
         state switch

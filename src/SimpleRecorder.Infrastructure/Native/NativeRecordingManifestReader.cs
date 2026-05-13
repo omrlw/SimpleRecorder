@@ -126,7 +126,20 @@ internal static class NativeRecordingManifestReader
                 CropResizeMismatchReason: ReadString(root, "cropResizeMismatchReason") ?? "none",
                 FirstSampleTimestampHns: ReadInt64(root, "firstSampleTimestampHns"),
                 LastSampleTimestampHns: ReadInt64(root, "lastSampleTimestampHns"),
-                LastSampleDurationHns: ReadInt64(root, "lastSampleDurationHns"));
+                LastSampleDurationHns: ReadInt64(root, "lastSampleDurationHns"),
+                AudioMode: ReadString(root, "audioMode") ?? "off",
+                AudioCodec: ReadString(root, "audioCodec") ?? "none",
+                AudioStatus: ReadString(root, "audioStatus") ?? "off",
+                AudioSampleRate: ReadInt32(root, "audioSampleRate"),
+                AudioChannels: ReadInt32(root, "audioChannels"),
+                SystemAudioDeviceName: ReadString(root, "systemAudioDeviceName") ?? "default",
+                MicrophoneDeviceName: ReadString(root, "microphoneDeviceName") ?? "default",
+                AudioSamplesWritten: ReadInt64(root, "audioSamplesWritten"),
+                AudioPacketsWritten: ReadInt64(root, "audioPacketsWritten"),
+                AudioDiscontinuities: ReadInt64(root, "audioDiscontinuities"),
+                AudioUnderflows: ReadInt64(root, "audioUnderflows"),
+                AudioDriftMs: ReadDouble(root, "audioDriftMs"),
+                AudioFailureReason: ReadString(root, "audioFailureReason"));
         }
         catch
         {

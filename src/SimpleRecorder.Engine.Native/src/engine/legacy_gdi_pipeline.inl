@@ -257,10 +257,16 @@
         return sink_writer->WriteSample(stream_index, sample.Get());
     }
 
-    HRESULT create_legacy_sink_writer(recording_session& session, ComPtr<IMFSinkWriter>& sink_writer, DWORD& stream_index, bool configure_encoder)
+    HRESULT create_legacy_sink_writer(
+        recording_session& session,
+        ComPtr<IMFSinkWriter>& sink_writer,
+        DWORD& stream_index,
+        DWORD& audio_stream_index,
+        bool configure_encoder)
     {
         sink_writer.Reset();
         stream_index = 0;
+        audio_stream_index = static_cast<DWORD>(-1);
 
         std::error_code create_error;
         std::filesystem::create_directories(session.final_output_path.parent_path(), create_error);
@@ -391,6 +397,12 @@
         }
 
         result = sink_writer->AddStream(output_type.Get(), &stream_index);
+        if (FAILED(result))
+        {
+            return result;
+        }
+
+        result = configure_audio_stream(sink_writer.Get(), session, audio_stream_index);
         if (FAILED(result))
         {
             return result;

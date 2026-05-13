@@ -242,14 +242,17 @@
 
         ComPtr<IMFSinkWriter> sink_writer;
         DWORD stream_index = 0;
-        auto writer_result = create_legacy_sink_writer(*session, sink_writer, stream_index, true);
+        DWORD audio_stream_index = static_cast<DWORD>(-1);
+        std::mutex writer_gate;
+        std::unique_ptr<audio_capture_controller> audio_capture;
+        auto writer_result = create_legacy_sink_writer(*session, sink_writer, stream_index, audio_stream_index, true);
         if (SUCCEEDED(writer_result))
         {
             session->encoder_config_status = "configured";
         }
         else
         {
-            writer_result = create_legacy_sink_writer(*session, sink_writer, stream_index, false);
+            writer_result = create_legacy_sink_writer(*session, sink_writer, stream_index, audio_stream_index, false);
             if (SUCCEEDED(writer_result))
             {
                 session->encoder_config_status = "fallback-without-encoder-config";
@@ -262,6 +265,16 @@
             std::scoped_lock lock(session->gate);
             session->encode_finished = true;
             return;
+        }
+
+        if (audio_stream_index != static_cast<DWORD>(-1))
+        {
+            audio_capture = std::make_unique<audio_capture_controller>(
+                *session,
+                sink_writer.Get(),
+                audio_stream_index,
+                writer_gate);
+            audio_capture->start();
         }
 
         const auto default_duration_qpc = frame_duration_qpc(session->target_frame_rate);
@@ -282,7 +295,11 @@
                 const auto sample_time_hns = frame_timestamp_hns(next_sample_index, session->target_frame_rate);
                 const auto sample_duration_hns = frame_duration_hns(next_sample_index, session->target_frame_rate);
                 const auto encode_started_qpc = qpc_now();
-                const auto result = write_legacy_sample(sink_writer.Get(), stream_index, pending_slot, sample_time_hns, sample_duration_hns);
+                HRESULT result = S_OK;
+                {
+                    std::scoped_lock writer_lock(writer_gate);
+                    result = write_legacy_sample(sink_writer.Get(), stream_index, pending_slot, sample_time_hns, sample_duration_hns);
+                }
                 const auto encode_finished_qpc = qpc_now();
                 if (FAILED(result))
                 {
@@ -420,11 +437,23 @@
 
         if (SUCCEEDED(session->failure))
         {
+            if (audio_capture != nullptr)
+            {
+                audio_capture->stop();
+                audio_capture.reset();
+            }
+
+            std::scoped_lock writer_lock(writer_gate);
             const auto finalize_result = sink_writer->Finalize();
             if (FAILED(finalize_result))
             {
                 fail_session(*session, finalize_result, L"Failed to finalize the legacy MP4 file.");
             }
+        }
+        else if (audio_capture != nullptr)
+        {
+            audio_capture->stop();
+            audio_capture.reset();
         }
 
         {

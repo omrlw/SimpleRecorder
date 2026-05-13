@@ -118,12 +118,13 @@ public sealed class JsonSettingsStore : ISettingsStore
     {
         var normalizedFrameRate = NormalizeFrameRate(settings.FrameRate);
         var normalizedResolution = NormalizeResolution(settings.Resolution);
+        var normalizedAudioMode = NormalizeAudioMode(settings);
         var needsNormalization =
             settings.FrameRate != normalizedFrameRate ||
             settings.Resolution != normalizedResolution ||
+            settings.AudioMode != normalizedAudioMode ||
             settings.SystemAudioEnabled ||
             settings.MicrophoneEnabled ||
-            settings.MicrophoneDeviceId is not null ||
             settings.VideoCodec != VideoCodec.H264;
         wasNormalized = needsNormalization;
         if (!needsNormalization)
@@ -133,11 +134,32 @@ public sealed class JsonSettingsStore : ISettingsStore
 
         settings.FrameRate = normalizedFrameRate;
         settings.Resolution = normalizedResolution;
+        settings.AudioMode = normalizedAudioMode;
         settings.SystemAudioEnabled = false;
         settings.MicrophoneEnabled = false;
-        settings.MicrophoneDeviceId = null;
         settings.VideoCodec = VideoCodec.H264;
         return settings;
+    }
+
+    private static AudioCaptureMode NormalizeAudioMode(AppSettings settings)
+    {
+        if (settings.SystemAudioEnabled || settings.MicrophoneEnabled)
+        {
+            return (settings.SystemAudioEnabled, settings.MicrophoneEnabled) switch
+            {
+                (true, true) => AudioCaptureMode.SystemAndMicrophone,
+                (true, false) => AudioCaptureMode.System,
+                (false, true) => AudioCaptureMode.Microphone,
+                _ => AudioCaptureMode.Off
+            };
+        }
+
+        if (Enum.IsDefined(settings.AudioMode))
+        {
+            return settings.AudioMode;
+        }
+
+        return AudioCaptureMode.Off;
     }
 
     private static FrameRateOption NormalizeFrameRate(FrameRateOption frameRate) =>

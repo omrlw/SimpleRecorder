@@ -138,6 +138,7 @@
         check(snapshot.sample_buffer->SetCurrentLength(snapshot.sample_buffer_length), L"IMFMediaBuffer::SetCurrentLength(snapshot)");
         check(snapshot.sample->SetSampleTime(sample_time), L"IMFSample::SetSampleTime");
         check(snapshot.sample->SetSampleDuration(std::max<LONGLONG>(sample_duration, 1)), L"IMFSample::SetSampleDuration");
+        std::scoped_lock writer_lock(_writer_gate);
         check(_sink_writer->WriteSample(_stream_index, snapshot.sample.Get()), L"IMFSinkWriter::WriteSample");
     }
 
@@ -148,7 +149,18 @@
             return E_FAIL;
         }
 
+        stop_audio();
+        std::scoped_lock writer_lock(_writer_gate);
         return _sink_writer->Finalize();
+    }
+
+    void encoder_backend::stop_audio() noexcept
+    {
+        if (_audio_capture != nullptr)
+        {
+            _audio_capture->stop();
+            _audio_capture.reset();
+        }
     }
 
     void encoder_backend::initialize_sink_writer()
@@ -441,6 +453,12 @@
             return fail(result, L"IMFSinkWriter::AddStream");
         }
 
+        result = configure_audio_stream(_sink_writer.Get(), _session, _audio_stream_index);
+        if (FAILED(result))
+        {
+            return fail(result, L"configure_audio_stream");
+        }
+
         ComPtr<IMFMediaType> input_type;
         result = MFCreateMediaType(&input_type);
         if (FAILED(result))
@@ -516,6 +534,16 @@
         if (FAILED(result))
         {
             return fail(result, L"IMFSinkWriter::BeginWriting");
+        }
+
+        if (_audio_stream_index != static_cast<DWORD>(-1))
+        {
+            _audio_capture = std::make_unique<audio_capture_controller>(
+                _session,
+                _sink_writer.Get(),
+                _audio_stream_index,
+                _writer_gate);
+            _audio_capture->start();
         }
 
         return result;

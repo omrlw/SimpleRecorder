@@ -7,12 +7,16 @@
 // processing, encoding, manifest, and lifecycle code reviewable by area.
 
 #include <codecapi.h>
+#include <audioclient.h>
+#include <avrt.h>
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
+#include <ksmedia.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <mmdeviceapi.h>
 #include <propsys.h>
 #include <propvarutil.h>
 #include <roapi.h>
@@ -26,6 +30,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -43,6 +48,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -59,6 +65,13 @@ namespace
     constexpr int32_t monitor_frame_rate_option = 0;
     constexpr int32_t product_monitor_frame_rate_limit = 120;
     constexpr int32_t h264_level_52_macroblocks_per_second = 2'073'600;
+    constexpr uint32_t audio_sample_rate = 48'000;
+    constexpr uint32_t audio_channels = 2;
+    constexpr uint32_t audio_bits_per_sample = 16;
+    constexpr uint32_t audio_bytes_per_sample = audio_bits_per_sample / 8;
+    constexpr uint32_t audio_bytes_per_frame = audio_channels * audio_bytes_per_sample;
+    constexpr uint32_t audio_aac_bitrate = 192'000;
+    constexpr uint32_t audio_mix_chunk_frames = 480;
     constexpr int32_t minimum_dimension = 2;
     constexpr int32_t maximum_auto_output_height = 2160;
     constexpr HRESULT capture_timeout = HRESULT_FROM_WIN32(WAIT_TIMEOUT);
@@ -76,6 +89,7 @@ namespace
 
     struct d3d_context;
     struct recording_session;
+    class audio_capture_controller;
 
     struct encoder_capability_probe;
 
@@ -95,6 +109,11 @@ namespace
         std::string backend,
         capture_fallback_reason reason,
         HRESULT hresult);
+    const char* audio_mode_name(int32_t audio_mode) noexcept;
+    bool audio_mode_includes_system(int32_t audio_mode) noexcept;
+    bool audio_mode_includes_microphone(int32_t audio_mode) noexcept;
+    HRESULT configure_audio_stream(IMFSinkWriter* sink_writer, recording_session& session, DWORD& stream_index);
+    int64_t compute_wall_duration_qpc(const recording_session& session);
 
     enum class pipeline_mode
     {
@@ -162,6 +181,11 @@ namespace
         LONGLONG last_sample_duration_hns = 0;
         int32_t output_width = 0;
         int32_t output_height = 0;
+        uint64_t audio_samples_written = 0;
+        uint64_t audio_packets_written = 0;
+        uint64_t audio_discontinuities = 0;
+        uint64_t audio_underflows = 0;
+        double audio_drift_millis = 0.0;
     };
 
     struct encoder_quality_config
@@ -203,7 +227,8 @@ namespace
         std::filesystem::path session_directory;
         std::filesystem::path final_output_path;
         sr_capture_source source{ sr_struct_version, sr_capture_source_display, 0, { 0, 0, 0, 0 } };
-        sr_recording_options options{ sr_struct_version, 30, 0, 0, 0, 1, 0, sr_encoder_preference_auto, sr_video_codec_h264 };
+        sr_recording_options options{ sr_struct_version, 30, 0, 0, 0, 0, 0, sr_encoder_preference_auto, sr_video_codec_h264, sr_audio_capture_off, nullptr };
+        std::wstring microphone_device_id;
         int32_t target_frame_rate = 30;
         int32_t monitor_refresh_rate = 0;
         std::string fps_cap_reason = "none";
@@ -230,6 +255,11 @@ namespace
         std::string encoder_name = "unknown";
         std::string encoder_codec = "h264";
         std::string encoder_pixel_format = "nv12";
+        std::string audio_codec = "none";
+        std::string audio_status = "off";
+        std::string system_audio_device_name = "default";
+        std::string microphone_device_name = "default";
+        std::string audio_failure_reason;
         std::string adapter_luid;
         encoder_quality_config quality_config;
         std::string encoder_config_status = "not-configured";
@@ -275,7 +305,7 @@ namespace
         std::mutex gate;
         sr_recorder_state state = sr_state_idle;
         sr_capture_source active_source{ sr_struct_version, sr_capture_source_display, 0, { 0, 0, 0, 0 } };
-        sr_recording_options active_options{ sr_struct_version, 30, 0, 0, 0, 1, 0, sr_encoder_preference_auto, sr_video_codec_h264 };
+        sr_recording_options active_options{ sr_struct_version, 30, 0, 0, 0, 0, 0, sr_encoder_preference_auto, sr_video_codec_h264, sr_audio_capture_off, nullptr };
         sr_status_callback callback = nullptr;
         void* callback_context = nullptr;
         bool initialized = false;
@@ -360,6 +390,34 @@ namespace
         virtual std::string consume_copy_mismatch_reason() { return {}; }
     };
 
+    class audio_capture_controller
+    {
+    public:
+        audio_capture_controller(recording_session& session, IMFSinkWriter* sink_writer, DWORD stream_index, std::mutex& writer_gate);
+        ~audio_capture_controller();
+
+        audio_capture_controller(const audio_capture_controller&) = delete;
+        audio_capture_controller& operator=(const audio_capture_controller&) = delete;
+
+        void start();
+        void stop() noexcept;
+
+        struct capture_source_state;
+
+    private:
+        void run() noexcept;
+        HRESULT initialize_source(bool system_loopback, const wchar_t* requested_device_id, capture_source_state& source);
+        HRESULT read_source(capture_source_state& source, std::vector<float>& mix, uint32_t frame_count, bool& had_data);
+        HRESULT write_mix(const std::vector<float>& mix, uint64_t start_frame, uint32_t frame_count);
+
+        recording_session& _session;
+        ComPtr<IMFSinkWriter> _sink_writer;
+        DWORD _stream_index = 0;
+        std::mutex& _writer_gate;
+        std::thread _thread;
+        std::atomic_bool _stop_requested{ false };
+    };
+
     class frame_graph
     {
     public:
@@ -402,7 +460,7 @@ namespace
     {
     public:
         encoder_backend(recording_session& session, d3d_context& d3d);
-        ~encoder_backend() = default;
+        ~encoder_backend();
 
         bool is_hardware_encode() const noexcept;
         const char* backend_name() const noexcept;
@@ -410,6 +468,7 @@ namespace
         void prepare_slot_samples();
         void write_slot(gpu_capture_slot& slot, LONGLONG sample_time, LONGLONG sample_duration);
         HRESULT finalize() noexcept;
+        void stop_audio() noexcept;
 
     private:
         void initialize_sink_writer();
@@ -425,10 +484,13 @@ namespace
         d3d_context& _d3d;
         ComPtr<IMFSinkWriter> _sink_writer;
         DWORD _stream_index = 0;
+        DWORD _audio_stream_index = static_cast<DWORD>(-1);
         bool _hardware_encode = false;
         std::wstring _last_stage;
         std::vector<encode_snapshot_slot> _encode_snapshots;
         size_t _next_encode_snapshot = 0;
+        std::mutex _writer_gate;
+        std::unique_ptr<audio_capture_controller> _audio_capture;
     };
 
     class wgc_capture_backend final : public capture_backend
@@ -1378,9 +1440,11 @@ namespace
     #include "engine/encoder_mf.inl"
     #include "engine/capture_backends.inl"
     #include "engine/legacy_gdi_pipeline.inl"
+    #include "engine/audio_capture.inl"
     #include "engine/capture_loops.inl"
     #include "engine/encode_loops.inl"
     #include "engine/session_lifecycle.inl"
+    #include "engine/compatibility_report.inl"
     #include "engine/manifest_writer.inl"
     #include "engine/engine_initialization.inl"
 
@@ -1472,6 +1536,18 @@ int32_t __stdcall sr_engine_prepare_recording_output(sr_engine_handle engine, co
     return sr_result_ok;
 }
 
+int32_t __stdcall sr_engine_write_compatibility_report(sr_engine_handle engine, const wchar_t* output_path)
+{
+    auto* stub = as_engine(engine);
+    if (stub == nullptr || output_path == nullptr || output_path[0] == L'\0')
+    {
+        return sr_result_invalid_argument;
+    }
+
+    const auto result = write_compatibility_report_json(std::filesystem::path(output_path));
+    return SUCCEEDED(result) ? sr_result_ok : sr_result_invalid_state;
+}
+
 int32_t __stdcall sr_engine_prepare_screenshot_output(sr_engine_handle engine, const wchar_t* output_path)
 {
     auto* stub = as_engine(engine);
@@ -1534,6 +1610,26 @@ int32_t __stdcall sr_engine_start(sr_engine_handle engine, const sr_capture_sour
     session->final_output_path = derive_final_video_path(recording_path);
     session->source = *source;
     session->options = *options;
+    if (session->options.version < 3)
+    {
+        session->options.audio_mode = (session->options.include_system_audio != 0 && session->options.include_microphone != 0)
+            ? sr_audio_capture_system_and_microphone
+            : session->options.include_system_audio != 0
+                ? sr_audio_capture_system
+                : session->options.include_microphone != 0
+                    ? sr_audio_capture_microphone
+                    : sr_audio_capture_off;
+        session->options.microphone_device_id = nullptr;
+    }
+    else if (session->options.audio_mode < sr_audio_capture_off || session->options.audio_mode > sr_audio_capture_system_and_microphone)
+    {
+        session->options.audio_mode = sr_audio_capture_off;
+    }
+    if (session->options.microphone_device_id != nullptr)
+    {
+        session->microphone_device_id = session->options.microphone_device_id;
+        session->options.microphone_device_id = session->microphone_device_id.c_str();
+    }
     session->encoder_preference = encoder_preference_name(options->encoder_preference);
     session->encoder_codec = video_codec_name(options->video_codec);
     if (options->video_codec != sr_video_codec_h264)

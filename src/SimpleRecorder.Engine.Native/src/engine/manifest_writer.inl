@@ -13,7 +13,7 @@
 
         json << std::fixed << std::setprecision(2);
         json << "{\n";
-        json << "  \"schemaVersion\": 10,\n";
+        json << "  \"schemaVersion\": 11,\n";
         json << "  \"artifactType\": \"streaming-mp4-session\",\n";
         json << "  \"requestedCaptureBackend\": \"" << escape_json(session.requested_capture_backend) << "\",\n";
         json << "  \"captureBackend\": \"" << escape_json(session.capture_backend) << "\",\n";
@@ -146,8 +146,29 @@
         json << "  \"requestedResolution\": " << session.options.resolution << ",\n";
         json << "  \"outputWidth\": " << session.metrics.output_width << ",\n";
         json << "  \"outputHeight\": " << session.metrics.output_height << ",\n";
-        json << "  \"includeSystemAudio\": " << (session.options.include_system_audio != 0 ? "true" : "false") << ",\n";
-        json << "  \"includeMicrophone\": " << (session.options.include_microphone != 0 ? "true" : "false") << ",\n";
+        json << "  \"includeSystemAudio\": " << (audio_mode_includes_system(session.options.audio_mode) ? "true" : "false") << ",\n";
+        json << "  \"includeMicrophone\": " << (audio_mode_includes_microphone(session.options.audio_mode) ? "true" : "false") << ",\n";
+        json << "  \"audioMode\": \"" << escape_json(audio_mode_name(session.options.audio_mode)) << "\",\n";
+        json << "  \"audioCodec\": \"" << escape_json(session.audio_codec) << "\",\n";
+        json << "  \"audioStatus\": \"" << escape_json(session.audio_status) << "\",\n";
+        json << "  \"audioSampleRate\": " << audio_sample_rate << ",\n";
+        json << "  \"audioChannels\": " << audio_channels << ",\n";
+        json << "  \"systemAudioDeviceName\": \"" << escape_json(session.system_audio_device_name) << "\",\n";
+        json << "  \"microphoneDeviceName\": \"" << escape_json(session.microphone_device_name) << "\",\n";
+        json << "  \"audioSamplesWritten\": " << session.metrics.audio_samples_written << ",\n";
+        json << "  \"audioPacketsWritten\": " << session.metrics.audio_packets_written << ",\n";
+        json << "  \"audioDiscontinuities\": " << session.metrics.audio_discontinuities << ",\n";
+        json << "  \"audioUnderflows\": " << session.metrics.audio_underflows << ",\n";
+        json << "  \"audioDriftMs\": " << session.metrics.audio_drift_millis << ",\n";
+        json << "  \"audioFailureReason\": ";
+        if (session.audio_failure_reason.empty())
+        {
+            json << "null,\n";
+        }
+        else
+        {
+            json << "\"" << escape_json(session.audio_failure_reason) << "\",\n";
+        }
         json << "  \"startedAtUnixMillis\": " << session.started_at_unix_millis << ",\n";
         json << "  \"completedAtUnixMillis\": " << unix_time_millis() << ",\n";
         json << "  \"wallDurationMs\": " << qpc_to_millis(wall_duration_qpc) << ",\n";

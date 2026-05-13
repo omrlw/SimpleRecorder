@@ -16,6 +16,29 @@ public sealed partial class SettingsFlyout
 
     private HudViewModel? ViewModel => DataContext as HudViewModel;
 
+    private void OnAudioModeFlyoutOpening(object sender, object e)
+    {
+        if (sender is not MenuFlyout flyout || ViewModel is null)
+        {
+            return;
+        }
+
+        flyout.Items.Clear();
+        foreach (var option in ViewModel.AudioModeOptions)
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = FormatOption(option),
+                IsChecked = option == ViewModel.SelectedAudioMode
+            };
+
+            ApplyMenuItemStyle(item);
+            var selectedOption = option;
+            item.Click += (_, _) => ViewModel.SelectedAudioMode = selectedOption;
+            flyout.Items.Add(item);
+        }
+    }
+
     private void OnMicrophoneFlyoutOpening(object sender, object e)
     {
         if (sender is not MenuFlyout flyout || ViewModel is null)

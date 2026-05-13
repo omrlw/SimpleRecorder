@@ -7,8 +7,7 @@ public sealed record RecordingOptions(
     ResolutionOption Resolution,
     QualityPreset QualityPreset,
     CountdownOption Countdown,
-    bool IsSystemAudioEnabled,
-    bool IsMicrophoneEnabled,
+    AudioCaptureMode AudioMode,
     string? MicrophoneDeviceId,
     string SaveDirectory,
     EncoderPreference EncoderPreference,
@@ -16,4 +15,10 @@ public sealed record RecordingOptions(
     RecordingProfile VideoProfile)
 {
     public bool ShouldShowCountdown => Countdown != CountdownOption.Off;
+
+    public bool IsSystemAudioEnabled =>
+        AudioMode is AudioCaptureMode.System or AudioCaptureMode.SystemAndMicrophone;
+
+    public bool IsMicrophoneEnabled =>
+        AudioMode is AudioCaptureMode.Microphone or AudioCaptureMode.SystemAndMicrophone;
 }

@@ -11,6 +11,14 @@ public sealed class OptionDisplayConverter : IValueConverter
             FrameRateOption.Monitor => "120 fps",
             FrameRateOption frameRate => $"{(int)frameRate} fps",
             CountdownOption countdown => countdown == CountdownOption.Off ? "Off" : $"{(int)countdown}s",
+            AudioCaptureMode audioMode => audioMode switch
+            {
+                AudioCaptureMode.Off => "Off",
+                AudioCaptureMode.System => "Computer",
+                AudioCaptureMode.Microphone => "Microphone",
+                AudioCaptureMode.SystemAndMicrophone => "Both",
+                _ => audioMode.ToString()
+            },
             ResolutionOption resolution => resolution switch
             {
                 ResolutionOption.Auto => "Auto",

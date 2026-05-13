@@ -21,11 +21,13 @@ Implemented now:
 - H.264/MP4 output through Media Foundation.
 - GPU-first capture/processing with DXGI/WGC native backends and compatibility fallbacks.
 - Verified hardware encoder selection with CPU/software fallback blocked whenever GPU hardware is detected.
-- Settings persistence and post-stop `.srrec/manifest.json` metadata, including capture FPS, container FPS, duplication ratio, geometry, and encoder details.
+- Settings persistence and post-stop `.srrec/manifest.json` metadata, including capture FPS, container FPS, duplication ratio, geometry, encoder details, and audio capture telemetry.
+- Native WASAPI shared-mode audio capture for computer audio, microphone audio, both mixed into one AAC stereo track, or audio off.
+- A compatibility report probe that writes a JSON summary of DXGI adapters, D3D11 video support, WGC availability, DXGI duplication startup, and Media Foundation H.264/NV12 hardware negotiation profiles.
 
 Not complete yet:
-- Real desktop audio and microphone capture.
 - Preview rendering.
+- Automated smoke recording inside the compatibility report.
 - Signing, packaging polish, and release automation.
 
 ## Architecture

@@ -6,7 +6,7 @@
 - Minimal recorder HUD, not a dashboard.
 - Fast source selection and recording controls.
 - Clear quality, resolution, countdown, and output state.
-- Audio controls should support desktop audio, microphone, both, or neither once the native audio path is ready.
+- Audio controls expose Off, Computer, Microphone, and Both. Microphone selection is enabled only when the mode includes microphone.
 - No camera controls.
 - No screenshot controls.
 

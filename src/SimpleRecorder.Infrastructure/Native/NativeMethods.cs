@@ -6,7 +6,7 @@ internal static partial class NativeMethods
 {
     internal const string LibraryName = "SimpleRecorder.Engine.Native";
     internal const int CurrentAbiVersion = 3;
-    internal const int CurrentStructVersion = 2;
+    internal const int CurrentStructVersion = 3;
 
     internal enum SrResultCode
     {
@@ -76,6 +76,8 @@ internal static partial class NativeMethods
         internal readonly int IncludeMicrophone;
         internal readonly int EncoderPreference;
         internal readonly int VideoCodec;
+        internal readonly int AudioMode;
+        internal readonly nint MicrophoneDeviceId;
 
         internal SrRecordingOptions(
             int version,
@@ -86,7 +88,9 @@ internal static partial class NativeMethods
             int includeSystemAudio,
             int includeMicrophone,
             int encoderPreference,
-            int videoCodec)
+            int videoCodec,
+            int audioMode,
+            nint microphoneDeviceId)
         {
             Version = version;
             FrameRate = frameRate;
@@ -97,6 +101,8 @@ internal static partial class NativeMethods
             IncludeMicrophone = includeMicrophone;
             EncoderPreference = encoderPreference;
             VideoCodec = videoCodec;
+            AudioMode = audioMode;
+            MicrophoneDeviceId = microphoneDeviceId;
         }
     }
 
@@ -136,6 +142,9 @@ internal static partial class NativeMethods
 
     [LibraryImport(LibraryName, EntryPoint = "sr_engine_prepare_recording_output", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial int PrepareRecordingOutput(nint engine, string outputPath);
+
+    [LibraryImport(LibraryName, EntryPoint = "sr_engine_write_compatibility_report", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial int WriteCompatibilityReport(nint engine, string outputPath);
 
     [LibraryImport(LibraryName, EntryPoint = "sr_engine_start")]
     internal static partial int Start(nint engine, in SrCaptureSource source, in SrRecordingOptions options);

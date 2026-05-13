@@ -16,6 +16,7 @@ extern "C"
     SR_API int32_t __stdcall sr_engine_set_callback(sr_engine_handle engine, sr_status_callback callback, void* context);
     SR_API int32_t __stdcall sr_engine_initialize(sr_engine_handle engine);
     SR_API int32_t __stdcall sr_engine_prepare_recording_output(sr_engine_handle engine, const wchar_t* output_path);
+    SR_API int32_t __stdcall sr_engine_write_compatibility_report(sr_engine_handle engine, const wchar_t* output_path);
     // Legacy ABI entry retained for version compatibility. Screenshot capture is not a product feature.
     SR_API int32_t __stdcall sr_engine_prepare_screenshot_output(sr_engine_handle engine, const wchar_t* output_path);
     SR_API int32_t __stdcall sr_engine_start(sr_engine_handle engine, const sr_capture_source* source, const sr_recording_options* options);
